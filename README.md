@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree. Both edges are counted, so the resolution is 0.5°.
-- **Size:** about 16 kB of flash and 1.5 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6.
+- **Size:** about 16 kB of flash and 1.5 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 350 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -157,9 +157,22 @@ docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh -c 'g++ -std=c++17 -O2 
 docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh host/hamlib_test.sh
 # event log through rotctld: rotorlog.py collects while rotctl moves the simulated rotator, then analyses
 docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh host/log_test.sh
+# AVR level: the compiled .elf in simavr (ATmega328P 16 MHz) with a motor model on the real pins
+docker build -t hamcam-rotorsimavr:dev -f docker/Dockerfile.simavr docker
+docker run --rm -v $PWD:/w -w /w hamcam-rotorsimavr:dev sh -c 'g++ -std=c++17 -O2 -I/usr/include/simavr -o build-host/avrtest host/avrtest.cpp -lsimavr -lsimavrparts -lelf && ./build-host/avrtest' 
 ```
 
-The simulator also checks the hardware rules:
+The AVR-level test (`host/avrtest.cpp`) covers what the host simulator cannot:
+- the Timer2 PWM registers (490 and 980 Hz, read from the registers, because simavr does not drive OC2A in PWM modes);
+- the 2 kHz sampling interrupt on PD2;
+- serial reply latency (8.5 ms);
+- relay and brake pins, and the CW button on A5;
+- the LCD contents (HD44780 model);
+- EEPROM: takeover from a K3NG image, the position block and the K3NG mirror;
+- the watchdog being enabled;
+- stack depth: at least 350 bytes never used.
+
+Both simulators check the hardware rules:
 - no relay switching under current;
 - no reversal while the motor still turns;
 - no PWM jump on start;

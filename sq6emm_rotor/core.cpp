@@ -49,6 +49,7 @@ void Rotor::sample(uint8_t level, uint32_t now_ms) {
 void Rotor::log_isr(uint8_t type, uint32_t now, int16_t c, uint8_t flags) {
   int8_t d = drive_dir ? drive_dir : (flags & 0x80 ? last_dir : 0);
   LogRec &r = logbuf[log_seq % LOG_N];
+  if ((int32_t)(now - t_log) < 0) now = t_log;     // main-loop events carry the pass start time: keep the log monotonic
   r.t = now; r.c = c; r.p = pwm_now;
   r.k = type | (d > 0 ? 0x10 : (d < 0 ? 0x20 : 0)) | flags;
   if (++log_seq == LOG_N) log_full = true;
@@ -76,6 +77,13 @@ void Rotor::set_state(uint8_t ns, uint32_t now) {
   st = ns; t_state = now;
   if (ns == S_RUN) slow_logged = false;
   log_ev(state_event[ns], now);
+}
+
+// The main loop takes 'now' once per pass; a pulse later in the same pass carries a newer timestamp. Clamp it to
+// 'now', otherwise now - last_edge wraps to ~4e9 ms (false jam, "quiet" right after a pulse, early saves).
+uint32_t Rotor::last_edge(uint32_t now) const {
+  uint32_t le; ATOMIC_BEGIN le = last_edge_ms; ATOMIC_END
+  return (int32_t)(now - le) < 0 ? now : le;
 }
 
 int16_t Rotor::cnt_copy() const { int16_t c; ATOMIC_BEGIN c = cnt; ATOMIC_END return c; }
@@ -135,9 +143,14 @@ void Rotor::stop_now() {
 
 void Rotor::set_position(int16_t t) {
   int16_t p = pos();
-  if (t >= 0 && t < 3600) {                          // keep the current turn
-    if (iabs16(t + 3600 - p) < iabs16(t - p)) t += 3600;
-    else if (iabs16(t - 3600 - p) < iabs16(t - p)) t -= 3600;
+  if (t >= 0 && t < 3600 && !(errors & ER_NOPOS)) {   // keep the current turn (unknown position: take t as it is)
+    int16_t best = t;
+    for (int8_t k = -1; k <= 1; k += 2) {
+      int16_t c = t + k * 3600;
+      if (c < s.az_min - POS_MARGIN_T || c > s.az_max + POS_MARGIN_T) continue;   // only turns inside the range
+      if (iabs16(c - p) < iabs16(best - p)) best = c;
+    }
+    t = best;
   }
   int16_t c = t2c(t);
   ATOMIC_BEGIN cnt = c; ATOMIC_END
@@ -176,8 +189,7 @@ static uint8_t slow_pwm(int16_t d, int16_t z, uint8_t c, uint8_t floor) {
 
 bool Rotor::save_due(uint32_t now) const {
   if (st != S_IDLE) return false;
-  uint32_t le; ATOMIC_BEGIN le = last_edge_ms; ATOMIC_END
-  if ((now - le) < SAVE_AFTER_MS) return false;
+  if ((now - last_edge(now)) < SAVE_AFTER_MS) return false;
   return !has_saved || cnt_copy() != saved_cnt;
 }
 
@@ -187,7 +199,7 @@ void Rotor::tick(uint32_t now) {
   if (dt > 100) dt = 100;
   t_tick = now;
   int16_t p = pos();
-  uint32_t le; ATOMIC_BEGIN le = last_edge_ms; ATOMIC_END
+  uint32_t le = last_edge(now);
 
   // contact chatter far beyond normal bounce -> sensor error (latched until RESET)
   if (now - rej_window_ms >= 1000) {

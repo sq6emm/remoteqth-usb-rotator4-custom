@@ -1,0 +1,3 @@
+# AVR-level test: the compiled firmware (.elf) runs in simavr with a motor model on the pins
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends g++ make pkg-config libsimavr-dev libelf-dev && rm -rf /var/lib/apt/lists/*

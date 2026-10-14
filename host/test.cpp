@@ -180,6 +180,9 @@ static void test_protocol() {
   CHECK(s.send("CR7\n") == "CR7,88.5\r\n", "CR7");
   s.send("CW9,1\n"); s.send("CW7,-12.5\n"); CHECK(s.send("AZ\n") == "AZ-12.5\r\n", "raw reporting: %s", s.send("AZ\n").c_str());
   s.send("CW9,0\n"); CHECK(s.send("AZ\n") == "AZ347.5\r\n", "normal reporting: %s", s.send("AZ\n").c_str());
+  s.send("CW7,200.0\n"); CHECK(s.send("AR\n") == "AR200.0\r\n", "CW7 never picks a turn outside the range (from -12.5: 200, not -160): %s", s.send("AR\n").c_str());
+  s.send("CW7,350.0\n"); CHECK(s.send("AR\n") == "AR-10.0\r\n" || s.send("AR\n") == "AR350.0\r\n", "CW7 350 from 200: %s", s.send("AR\n").c_str());
+  s.send("CW7,-12.5\n");
   CHECK(s.send("CR3\n") == "CR3,-30.0\r\n" && s.send("CR4\n") == "CR4,390.0\r\n", "range registers");
   CHECK(s.send("CW4,350\n") == "" && s.send("CR4\n") == "CR4,390.0\r\n", "range < 360 refused");
   CHECK(s.send("CRz\n") == "CRz,?\r\n", "unknown register");

@@ -117,6 +117,7 @@ private:
   int16_t hi() const { return s.az_max; }
   int16_t dist_to_limit() const;
   bool coasting(uint32_t now, uint32_t le) const;
+  uint32_t last_edge(uint32_t now) const;   // last pulse time, never later than now
   uint8_t cap() const;
   void start_request(int8_t d);
   bool slow_logged = false;
