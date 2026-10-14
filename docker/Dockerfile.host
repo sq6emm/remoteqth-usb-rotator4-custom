@@ -1,0 +1,3 @@
+# Host build + tests: g++ for the core and the simulator, Hamlib for rotctld -m 204 (EasycommIII)
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends g++ make libhamlib-utils && rm -rf /var/lib/apt/lists/*
