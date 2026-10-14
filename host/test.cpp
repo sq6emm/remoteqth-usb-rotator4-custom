@@ -2,6 +2,7 @@
 #define SIM_HW_IMPL
 #include "sim.h"
 #include <cstring>
+#include <vector>
 
 Sim *g_sim = nullptr;
 static int fails = 0, checks = 0;
@@ -239,8 +240,60 @@ static void test_endurance() {
   CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
 }
 
+// read the whole event log through the protocol, like the PC tool does
+struct Ev { uint16_t seq; uint32_t t; int c, p, k; };
+static std::vector<Ev> read_log(Sim &s, uint16_t &next, int *lost = nullptr) {
+  std::vector<Ev> v;
+  for (int guard = 0; guard < 100; guard++) {
+    std::string r = s.send("LG" + std::to_string(next) + "\n");
+    unsigned first; unsigned long now; int off = 0;
+    if (sscanf(r.c_str(), "LG%u@%lu:%n", &first, &now, &off) < 2 || !off) break;
+    if (lost && first != next) *lost += (uint16_t)(first - next);
+    const char *q = r.c_str() + off; int n = 0;
+    uint16_t seq = first;
+    Ev e; int used;
+    while (sscanf(q, "%u,%d,%d,%d;%n", &e.t, &e.c, &e.p, &e.k, &used) == 4) { e.seq = seq++; v.push_back(e); q += used; n++; }
+    next = seq;
+    if (!n) break;
+  }
+  return v;
+}
+
+static void test_log() {
+  printf("event log: LG through the protocol, one move from 100 to 103 (read during the move)\n");
+  Sim s(100.0);
+  uint16_t next = 0; int lost = 0;
+  std::vector<Ev> all;
+  s.send("AZ103\n");
+  for (int i = 0; i < 40; i++) { s.run(250); auto v = read_log(s, next, &lost); all.insert(all.end(), v.begin(), v.end()); }
+  int edges = 0, coast = 0, samples = 0; std::string seqs;
+  for (auto &e : all) {
+    int ty = e.k & 15;
+    if (ty == E_EDGE) { edges++; if (e.k & 0x80) coast++; }
+    else if (ty == E_SAMPLE) samples++;
+    else seqs += std::to_string(ty) + " ";
+  }
+  printf("  %zu events, %d edges (%d coasting), %d samples, others: %s lost %d\n", all.size(), edges, coast, samples, seqs.c_str(), lost);
+  CHECK(lost == 0, "events lost while polling every 250 ms");
+  CHECK(seqs == "14 2 3 4 6 7 ", "state events CMD START RUN SLOW CUT IDLE, got %s", seqs.c_str());
+  CHECK(edges == 6, "3 deg = 6 edges, got %d", edges);
+  CHECK(samples > 5, "PWM samples while driven: %d", samples);
+  bool mono = true; for (size_t i = 1; i < all.size(); i++) if (all[i].t < all[i - 1].t || all[i].seq != (uint16_t)(all[i - 1].seq + 1)) mono = false;
+  CHECK(mono, "time and sequence increase");
+  CHECK(all.size() && all[0].c == 1030 && (all[0].k & 15) == E_CMD, "first event = command with the target 103.0");
+  // overflow: a long move without reading, then ask from 0 -> the oldest kept entries, gap reported
+  Sim s2(0.0);
+  s2.send("AZ200\n"); settle(s2);
+  uint16_t n2 = 0; int lost2 = 0;
+  auto v2 = read_log(s2, n2, &lost2);
+  printf("  long unread move: %u events written, %zu kept, gap %d\n", s2.rot.log_seq, v2.size(), lost2);
+  CHECK(v2.size() == LOG_N && lost2 == (int)s2.rot.log_seq - LOG_N, "ring keeps the last %d", LOG_N);
+  CHECK(s2.send("LG" + std::to_string(n2) + "\n").find(':') + 3 == s2.send("LG" + std::to_string(n2) + "\n").size(), "caught up: no records");
+}
+
 int main() {
   test_protocol();
+  test_log();
   test_goto_basic();
   test_overlap();
   test_reversal();

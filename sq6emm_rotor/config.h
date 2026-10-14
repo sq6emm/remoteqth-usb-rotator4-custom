@@ -43,6 +43,8 @@
 #define SLOW_PWM_CAP        200   // slow-down ramps start at most at this PWM
 #define OVERSHOOT_T          10   // overshoot correction (register a) when off target by >= 1.0 deg
 #define POS_MARGIN_T        150   // the counter keeps counting 15 deg beyond the range (never loses pulses)
+#define LOG_N                64   // event log entries (8 bytes each), read with LG<seq>
+#define LOG_SAMPLE_MS       100   // while the motor is driven: a PWM/position sample if nothing else was logged
 
 // ---- encoder (preset knob) ----
 #define ENC_LOW          300      // ADC hysteresis thresholds (external AREF from the board divider)

@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree. Both edges are counted, so the resolution is 0.5°.
-- **Size:** about 14 kB, against 27 kB for the K3NG-based ver 6.
+- **Size:** about 16 kB of flash and 1.5 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6.
 
 ## What it does
 
@@ -46,6 +46,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `PARK` | Go to the park position (register f). |
 | `AR` | SQ6EMM extension: raw position, for example `AR375.5` (which turn). |
 | `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>`. |
+| `LG`, `LG<seq>` | SQ6EMM extension: event log. `LG` gives `LG<next seq>@<ms>:`. `LG<seq>` returns up to 6 records from seq: `LG<first>@<ms>:t,c,p,k;…` (see below). |
 
 ### Registers
 
@@ -99,6 +100,34 @@ The firmware's own data lives at byte 128 (settings, with CRC) and byte 192 (pos
 - **Every save** also writes K3NG's `last_azimuth`. Flashing ver 6 back therefore still finds the right position. Ver 6 only knows 0..360, and its counter stops at −15/375, so flash it back only while the rotator is inside 0..360.
 - **No stored position:** the start position is 0 with `GE` bit 16. Calibrate with `CW7,<deg>`.
 
+## Event log (motor characterisation)
+
+A 64-entry ring buffer in RAM records the following, each with a millisecond timestamp, the position and the PWM:
+- every accepted pulse edge (level, and whether it came while coasting);
+- a sample every 100 ms while the motor is driven, if nothing else was logged;
+- each state change: command (with target), relay on, ramp start, slow-down entered, soft stop, cut, relay off, explicit STOP, stall, timeout, range end, coasting hold.
+
+Record fields `t,c,p,k`:
+- `t`: milliseconds since power-up.
+- `c`: position in 0.5° counts. For a command record it is the target in 0.1°.
+- `p`: PWM.
+- `k`: `type | dir << 4 | level << 6 | coast << 7`. Types: 1 edge, 2 start, 3 run, 4 slow, 5 soft, 6 cut, 7 idle, 8 sample, 9 stop, 10 stall, 11 timeout, 12 range end, 13 hold, 14 command. Direction: 1 CW, 2 CCW.
+
+`host/rotorlog.py` collects the log into a CSV and analyses it. It **only reads**; it never moves the rotator.
+
+```
+python3 host/rotorlog.py collect --rotctld 192.168.14.199:4533 -o run1.csv   # through rotctld's raw 'w', hamcam keeps running
+python3 host/rotorlog.py collect --serial /dev/rotator -o run1.csv           # direct (rotctld stopped; opening the port resets the MCU)
+python3 host/rotorlog.py analyse run1.csv
+```
+
+The analysis gives, per move:
+- the time from the ramp start to the first pulse, and the PWM at that moment (break-away);
+- the top speed;
+- the coasting distance and time after the cut or STOP.
+
+It also builds a speed-versus-PWM table from full-degree periods at steady PWM, which avoids the 77/23 % contact duty asymmetry. Through rotctld the collector manages about 2.7 queries/s × 6 records, which keeps up with a full-speed move (about 12 events/s) with margin. Tested: `host/log_test.sh`.
+
 ## Hamlib
 
 ```
@@ -126,6 +155,8 @@ docker build -t hamcam-rotorhost:dev -f docker/Dockerfile.host docker
 docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh -c 'g++ -std=c++17 -O2 -Wall -o build-host/test host/test.cpp sq6emm_rotor/core.cpp sq6emm_rotor/proto.cpp && ./build-host/test'
 # Hamlib integration: real rotctld -m 204 against the simulated controller on a pty
 docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh host/hamlib_test.sh
+# event log through rotctld: rotorlog.py collects while rotctl moves the simulated rotator, then analyses
+docker run --rm -v $PWD:/w -w /w hamcam-rotorhost:dev sh host/log_test.sh
 ```
 
 The simulator also checks the hardware rules:

@@ -7,10 +7,9 @@
 // Set commands get no reply (Hamlib does not read one). Unknown commands are ignored, as the standard allows.
 
 const char *Proto::feed(char c, uint32_t now_ms) {
-  (void)now_ms;
   if (c == '\r' || c == '\n') {
     rlen = 0; reply[0] = 0;
-    if (len && !overflow) { line[len] = 0; run_line(); }
+    if (len && !overflow) { line[len] = 0; run_line(now_ms); }
     len = 0; overflow = false;
     if (!rlen) return nullptr;
     put("\r\n");
@@ -28,7 +27,7 @@ void Proto::put(const char *s) {
 void Proto::put_tenths(int16_t v) { char b[10]; fmt_tenths(b, v); put(b); }
 void Proto::put_u32(uint32_t v) { char b[12]; fmt_u32(b, v); put(b); }
 
-void Proto::run_line() {
+void Proto::run_line(uint32_t now) {
   char *tok[12]; uint8_t n = 0;
   char *p = line;
   while (*p && n < 12) {
@@ -41,15 +40,16 @@ void Proto::run_line() {
     bool used = false;
     uint8_t before = rlen;
     if (rlen) put(" ");
-    cmd(tok[i], i + 1 < n ? tok[i + 1] : nullptr, &used);
+    cmd(tok[i], i + 1 < n ? tok[i + 1] : nullptr, &used, now);
     if (rlen == before + (before ? 1 : 0)) { rlen = before; reply[rlen] = 0; }   // no answer: drop the separator
     if (used) i++;
   }
 }
 
 static bool is(const char *t, char a, char b) { return t[0] == a && t[1] == b; }
+static void fmt_i16(char *o, int16_t v) { if (v < 0) { *o++ = '-'; v = -v; } fmt_u32(o, (uint16_t)v); }
 
-void Proto::cmd(const char *t, const char *next, bool *used_next) {
+void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) {
   if (!strcmp(t, "RESET")) { rot.stop_now(); rot.clear_errors(); return; }
   if (!strcmp(t, "PARK")) { rot.set_speed(0); rot.goto_raw(rot.s.park); return; }
   if (!t[0] || !t[1]) return;
@@ -105,6 +105,20 @@ void Proto::cmd(const char *t, const char *next, bool *used_next) {
   if (is(t, 'A', 'N')) { put("AN"); put(diag_analog ? diag_analog() : "0"); return; }
   // SQ6EMM extensions
   if (is(t, 'A', 'R')) { put("AR"); put_tenths(rot.pos()); return; }          // raw position (which turn)
+  if (is(t, 'L', 'G')) {                       // event log: LG = "LG<next seq>@<ms>:", LG<seq> = up to 6 records from seq
+    if (!*arg) { uint16_t h; ATOMIC_BEGIN h = rot.log_seq; ATOMIC_END put("LG"); put_u32(h); put("@"); put_u32(now); put(":"); return; }
+    uint32_t from = 0; const char *q = arg;
+    while (*q >= '0' && *q <= '9') from = from * 10 + (*q++ - '0');
+    if (*q) return;
+    LogRec r[6]; uint16_t first;
+    uint8_t n = rot.log_read((uint16_t)from, r, 6, &first);
+    put("LG"); put_u32(first); put("@"); put_u32(now); put(":");
+    for (uint8_t i = 0; i < n; i++) {
+      char b[8];
+      put_u32(r[i].t); put(","); fmt_i16(b, r[i].c); put(b); put(","); put_u32(r[i].p); put(","); put_u32(r[i].k); put(";");
+    }
+    return;
+  }
   if (is(t, 'P', 'D')) {                                                       // pulse / motion diagnostics
     uint32_t a, r, c;
     ATOMIC_BEGIN a = rot.n_acc; r = rot.n_rej; c = rot.n_coast; ATOMIC_END

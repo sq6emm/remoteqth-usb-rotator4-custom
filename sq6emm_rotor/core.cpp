@@ -38,9 +38,44 @@ void Rotor::sample(uint8_t level, uint32_t now_ms) {
   edge_dt[1] = edge_dt[0]; edge_dt[0] = dt > 65535UL ? 65535 : (uint16_t)dt;
   last_level = level; last_edge_ms = now_ms; n_acc++;
   int8_t d = drive_dir;
-  if (!d) { d = last_dir; n_coast++; }
+  uint8_t coast = 0;
+  if (!d) { d = last_dir; n_coast++; coast = 1; }
   if (d > 0) { if (cnt < t2c(s.az_max + POS_MARGIN_T)) cnt++; }
   else if (d < 0) { if (cnt > t2c(s.az_min - POS_MARGIN_T)) cnt--; }
+  log_isr(E_EDGE, now_ms, cnt, (level << 6) | (coast << 7));
+}
+
+// ---------------------------------------------------------------- event log
+void Rotor::log_isr(uint8_t type, uint32_t now, int16_t c, uint8_t flags) {
+  int8_t d = drive_dir ? drive_dir : (flags & 0x80 ? last_dir : 0);
+  LogRec &r = logbuf[log_seq % LOG_N];
+  r.t = now; r.c = c; r.p = pwm_now;
+  r.k = type | (d > 0 ? 0x10 : (d < 0 ? 0x20 : 0)) | flags;
+  if (++log_seq == LOG_N) log_full = true;
+  t_log = now;
+}
+
+void Rotor::log_ev(uint8_t type, uint32_t now, int16_t c) {
+  ATOMIC_BEGIN log_isr(type, now, c == 0x7FFF ? cnt : c, 0); ATOMIC_END
+}
+
+uint8_t Rotor::log_read(uint16_t from, LogRec *out, uint8_t max, uint16_t *first) const {
+  uint8_t n = 0;
+  ATOMIC_BEGIN
+    uint16_t head = log_seq, oldest = log_full ? (uint16_t)(head - LOG_N) : 0;
+    if ((uint16_t)(head - from) > (uint16_t)(head - oldest)) from = oldest;   // too old (or from the future)
+    *first = from;
+    while (n < max && from != head) { out[n++] = logbuf[from % LOG_N]; from++; }
+  ATOMIC_END
+  return n;
+}
+
+static const uint8_t state_event[] = {E_IDLE, E_START, E_RUN, E_SOFT, E_CUT};   // S_IDLE .. S_RELAY_OFF
+
+void Rotor::set_state(uint8_t ns, uint32_t now) {
+  st = ns; t_state = now;
+  if (ns == S_RUN) slow_logged = false;
+  log_ev(state_event[ns], now);
 }
 
 int16_t Rotor::cnt_copy() const { int16_t c; ATOMIC_BEGIN c = cnt; ATOMIC_END return c; }
@@ -64,6 +99,7 @@ bool Rotor::goto_raw(int16_t t) {
   if (s.endpoints && (t < lo() || t > hi())) { errors |= ER_LIMIT; return false; }
   tgt = t; mode = M_TARGET; want = true; corrected = false;
   errors &= ~(ER_JAM | ER_TIMEOUT | ER_LIMIT);
+  log_ev(E_CMD, t_tick, t);
   return true;
 }
 
@@ -82,6 +118,7 @@ bool Rotor::goto_az(int16_t t) {
 void Rotor::manual(int8_t d) {
   mode = M_MANUAL; mdir = d; want = true;
   errors &= ~(ER_JAM | ER_TIMEOUT | ER_LIMIT);
+  log_ev(E_CMD, t_tick, d > 0 ? s.az_max : s.az_min);
 }
 
 void Rotor::soft_stop() {
@@ -92,6 +129,7 @@ void Rotor::soft_stop() {
 void Rotor::stop_now() {
   want = false; mode = M_NONE;
   hw_pwm(0); pwm_now = 0; ramp_acc = 0;
+  log_ev(E_STOP, t_tick);
   if (st != S_IDLE && st != S_RELAY_OFF) set_state(S_RELAY_OFF, t_tick);
 }
 
@@ -158,6 +196,11 @@ void Rotor::tick(uint32_t now) {
     rej_in_window = (uint16_t)r; rej_window_ms = now;
   }
 
+  if (st != S_IDLE) {
+    uint32_t tl; ATOMIC_BEGIN tl = t_log; ATOMIC_END
+    if (now - tl >= LOG_SAMPLE_MS) log_ev(E_SAMPLE, now);
+  }
+
   // direction a pending request needs (0 = nothing to do)
   int8_t need = 0;
   if (want) {
@@ -175,7 +218,7 @@ void Rotor::tick(uint32_t now) {
     if (want) {
       if (!need) { want = false; break; }          // already there
       if (need != last_dir && coasting(now, le)) {   // still coasting the other way
-        if (!holding) { n_holds++; holding = true; }
+        if (!holding) { n_holds++; holding = true; log_ev(E_HOLD, now); }
         break;
       }
       holding = false; want = false;
@@ -203,11 +246,13 @@ void Rotor::tick(uint32_t now) {
     uint32_t since_pulse = now - (le > t_move ? le : t_move);
     if (s.jam && (now - t_move) > STALL_ARM_MS && since_pulse > STALL_NO_PULSE_MS) {
       errors |= ER_JAM; n_stalls++;
+      log_ev(E_STALL, now);
       stop_now();                                  // nothing turns, so there is nothing to ramp down
       break;
     }
     if ((now - t_move) > MOVE_TIMEOUT_MS) {
       errors |= ER_TIMEOUT; n_timeouts++;
+      log_ev(E_TIMEOUT, now);
       soft_stop();
       break;
     }
@@ -232,6 +277,7 @@ void Rotor::tick(uint32_t now) {
     if (s.endpoints) {
       int16_t dl = dist_to_limit();
       if (dl <= TOLERANCE_T) {
+        log_ev(E_LIMIT, now);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0; mode = M_NONE;
         set_state(S_RELAY_OFF, now);
         break;
@@ -243,6 +289,7 @@ void Rotor::tick(uint32_t now) {
     ramp_acc = (uint16_t)acc;
     uint8_t r = ramp_acc >> 8;
     if (w < r) { r = w; ramp_acc = (uint16_t)r << 8; }   // distance-based slow-down applies at once
+    if (w < c && !slow_logged) { slow_logged = true; log_ev(E_SLOW, now); }
     if (r != pwm_now) { pwm_now = r; hw_pwm(r); }
     break;
   }

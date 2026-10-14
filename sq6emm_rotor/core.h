@@ -36,6 +36,13 @@ struct Settings {             // register
 #define ER_NOPOS   16     // no stored position at power-up (set it with CW7)
 #define ER_LIMIT   32     // a target outside the range was refused
 
+// Event log (characterisation of the real motor: start delay, speed per PWM, coasting).
+// k = type | dir << 4 (1 CW, 2 CCW, 0 relays off) | level << 6 (edges) | coast << 7 (edge with the motor off)
+// c = position in 0.5 deg counts, except E_CMD: the new target in 0.1 deg
+struct LogRec { uint32_t t; int16_t c; uint8_t p; uint8_t k; };
+enum { E_EDGE = 1, E_START, E_RUN, E_SLOW, E_SOFT, E_CUT, E_IDLE, E_SAMPLE, E_STOP, E_STALL, E_TIMEOUT, E_LIMIT,
+       E_HOLD, E_CMD };
+
 class Rotor {
 public:
   Settings s;
@@ -50,6 +57,12 @@ public:
   volatile uint16_t edge_dt[2] = {0, 0};   // the last two intervals between accepted edges (ms)
   volatile uint32_t n_acc = 0, n_rej = 0, n_coast = 0;
   uint16_t n_holds = 0, n_stalls = 0, n_timeouts = 0;
+
+  LogRec logbuf[LOG_N];
+  volatile uint16_t log_seq = 0;                     // events written so far (the next sequence number, wraps)
+  volatile bool log_full = false;                    // the ring has wrapped at least once
+  // copies up to max records starting at sequence 'from' (or the oldest kept); returns the count, *first = seq
+  uint8_t log_read(uint16_t from, LogRec *out, uint8_t max, uint16_t *first) const;
 
   uint8_t errors = 0;
   uint8_t pwm_now = 0;
@@ -106,7 +119,11 @@ private:
   bool coasting(uint32_t now, uint32_t le) const;
   uint8_t cap() const;
   void start_request(int8_t d);
-  void set_state(uint8_t ns, uint32_t now) { st = ns; t_state = now; }
+  bool slow_logged = false;
+  volatile uint32_t t_log = 0;
+  void log_isr(uint8_t type, uint32_t now, int16_t c, uint8_t flags);   // interrupts already off
+  void log_ev(uint8_t type, uint32_t now, int16_t c = 0x7FFF);          // main loop (c default: position)
+  void set_state(uint8_t ns, uint32_t now);
 };
 
 // helpers shared with the protocol
