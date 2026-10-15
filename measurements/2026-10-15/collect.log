@@ -1,0 +1,76 @@
+  1310.815 cmd         pos  target 302.0 pwm 0
+  1310.815 start   ccw pos 342.0 target  pwm 0
+  1310.845 run     ccw pos 342.0 target  pwm 0
+   (1.8 queries/s, 71 events, 0 lost)
+  1320.740 slow    ccw pos 304.5 target  pwm 253
+  1321.496 cut     ccw pos 302.0 target  pwm 0
+  1321.526 idle        pos 302.0 target  pwm 0
+  1326.892 cmd         pos  target 342.0 pwm 0
+  1326.892 start   cw  pos 302.0 target  pwm 0
+  1326.922 run     cw  pos 302.0 target  pwm 0
+   (1.8 queries/s, 161 events, 0 lost)
+   (1.7 queries/s, 269 events, 0 lost)
+  1336.315 slow    cw  pos 339.5 target  pwm 253
+  1336.973 cut     cw  pos 342.0 target  pwm 0
+  1337.003 idle        pos 342.0 target  pwm 0
+  1341.297 cmd         pos  target -30.0 pwm 0
+  1341.297 start   ccw pos 342.0 target  pwm 0
+  1341.327 run     ccw pos 342.0 target  pwm 0
+   (1.7 queries/s, 358 events, 0 lost)
+  1349.869 cmd     ccw pos  target 324.0 pwm 90
+  1350.205 slow    ccw pos 326.5 target  pwm 132
+  1351.003 cut     ccw pos 324.0 target  pwm 0
+  1351.033 idle        pos 324.0 target  pwm 0
+  1355.294 cmd         pos  target 390.0 pwm 0
+  1355.294 start   cw  pos 324.0 target  pwm 0
+  1355.324 run     cw  pos 324.0 target  pwm 0
+   (1.8 queries/s, 449 events, 0 lost)
+  1363.883 cmd     cw  pos  target 344.0 pwm 90
+  1363.883 slow    cw  pos 342.0 target  pwm 90
+  1364.587 cut     cw  pos 344.0 target  pwm 0
+  1364.617 idle        pos 344.0 target  pwm 0
+  1369.163 cmd         pos  target -30.0 pwm 0
+  1369.163 start   ccw pos 344.0 target  pwm 0
+  1369.193 run     ccw pos 344.0 target  pwm 0
+   (1.8 queries/s, 526 events, 0 lost)
+  1377.752 cmd     ccw pos  target 322.0 pwm 119
+  1377.752 run         pos 323.5 target  pwm 119
+   (1.7 queries/s, 628 events, 0 lost)
+  1378.185 cut     ccw pos 322.0 target  pwm 0
+  1378.215 idle        pos 322.0 target  pwm 0
+  1383.128 cmd         pos  target 390.0 pwm 0
+  1383.128 start   cw  pos 322.0 target  pwm 0
+  1383.158 run     cw  pos 322.0 target  pwm 0
+   (1.8 queries/s, 707 events, 0 lost)
+  1391.732 cmd     cw  pos  target 347.0 pwm 119
+  1391.732 slow    cw  pos 345.5 target  pwm 119
+  1391.858 start       pos 346.0 target  pwm 109
+  1392.124 cut     cw  pos 347.0 target  pwm 0
+  1392.154 idle        pos 347.0 target  pwm 0
+  1397.188 cmd         pos  target -30.0 pwm 0
+  1397.188 start   ccw pos 347.0 target  pwm 0
+  1397.218 run     ccw pos 347.0 target  pwm 0
+   (1.8 queries/s, 783 events, 0 lost)
+  1400.971 stop        pos 336.5 target  pwm 176
+  1401.417 slow        pos 335.0 target  pwm 176
+  1401.828 stop        pos 333.5 target  pwm 176
+  1402.272 slow        pos 332.0 target  pwm 176
+  1402.682 stop        pos 330.5 target  pwm 176
+  1403.125 slow        pos 329.0 target  pwm 176
+Traceback (most recent call last):
+  File "/h/fw-build/sq6emm-rotor/host/rotorlog.py", line 176, in <module>
+    main()
+    ~~~~^^
+  File "/h/fw-build/sq6emm-rotor/host/rotorlog.py", line 172, in main
+    collect(args) if args.cmd == "collect" else analyse(args)
+    ~~~~~~~^^^^^^
+  File "/h/fw-build/sq6emm-rotor/host/rotorlog.py", line 90, in collect
+    first, now, recs = parse(link.query(f"LG{nxt}"))
+                       ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/h/fw-build/sq6emm-rotor/host/rotorlog.py", line 69, in parse
+    recs = [tuple(int(x) for x in r.split(",")) for r in body.split(";") if r]
+            ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/h/fw-build/sq6emm-rotor/host/rotorlog.py", line 69, in <genexpr>
+    recs = [tuple(int(x) for x in r.split(",")) for r in body.split(";") if r]
+                  ~~~^^^
+ValueError: invalid literal for int() with base 10: ''

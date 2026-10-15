@@ -1,0 +1,29 @@
+   1.23 start 342.0 GE 0 PDa74,r0,c1,h2,s0,t0,p0,f490
+   2.49 A long CCW: P 302 from 342.0 RPRT 0
+  17.30 A long CCW: landed 302.0 (err +0.0)
+  18.57 B long CW: P 342 from 302.0 RPRT 0
+  31.60 B long CW: landed 342.0 (err +0.0)
+  32.98 C manual CCW speed 15: M 8 15 from 342.0 RPRT 0
+  41.55 C manual CCW speed 15: P 324 to land RPRT 0
+  45.71 C manual CCW speed 15: landed 324.0 (err +0.0)
+  46.98 D manual CW speed 15: M 16 15 from 324.0 RPRT 0
+  55.56 D manual CW speed 15: P 344 to land RPRT 0
+  59.58 D manual CW speed 15: landed 344.0 (err +0.0)
+  60.85 E manual CCW speed 30: M 8 30 from 344.0 RPRT 0
+  69.43 E manual CCW speed 30: P 322 to land RPRT 0
+  73.55 E manual CCW speed 30: landed 322.0 (err +0.0)
+  74.81 F manual CW speed 30: M 16 30 from 322.0 RPRT 0
+  83.41 F manual CW speed 30: P 347 to land RPRT 0
+  87.61 F manual CW speed 30: landed 347.0 (err +0.0)
+  88.87 G manual CCW speed 60: M 8 60 from 347.0 RPRT 0
+  95.01 G manual CCW speed 60: P 328 to land RPRT 0
+ 100.36 G manual CCW speed 60: landed 328.0 (err +0.0)
+ 100.91 H manual CW speed 60: M 16 60 from 328.0 RPRT 0
+ 107.33 H manual CW speed 60: P 350 to land RPRT 0
+ 110.05 H manual CW speed 60: landed 350.0 (err +0.0)
+ 110.86 I short 2: P 352 from 350.0 RPRT 0
+ 114.69 I short 2: landed 352.0 (err +0.0)
+ 115.24 I short 2: P 350 from 352.0 RPRT 0
+ 119.04 I short 2: landed 350.0 (err +0.0)
+ 119.60 I short 5: P 355 from 350.0 RPRT 0
+ 122.28 SAFETY 355.0 GE 0 -> S RPRT 0

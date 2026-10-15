@@ -1,0 +1,76 @@
+  1773.746 cmd         pos  target 360.0 pwm 0
+  1773.746 start   cw  pos 355.0 target  pwm 0
+  1773.779 run     cw  pos 355.0 target  pwm 0
+  1775.329 slow    cw  pos 357.5 target  pwm 194
+  1776.038 cut     cw  pos 360.0 target  pwm 0
+  1776.068 idle        pos 360.0 target  pwm 0
+   (2.0 queries/s, 32 events, 0 lost)
+  1780.544 cmd         pos  target 355.0 pwm 0
+  1780.544 start   ccw pos 360.0 target  pwm 0
+  1780.574 run     ccw pos 360.0 target  pwm 0
+  1782.042 slow    ccw pos 357.5 target  pwm 183
+  1782.836 cut     ccw pos 355.0 target  pwm 0
+  1782.866 idle        pos 355.0 target  pwm 0
+  1787.375 cmd         pos  target 365.0 pwm 0
+  1787.375 start   cw  pos 355.0 target  pwm 0
+  1787.405 run     cw  pos 355.0 target  pwm 0
+   (1.8 queries/s, 97 events, 0 lost)
+  1789.991 slow    cw  pos 362.5 target  pwm 253
+  1790.678 cut     cw  pos 365.0 target  pwm 0
+  1790.708 idle        pos 365.0 target  pwm 0
+  1795.981 cmd         pos  target 355.0 pwm 0
+  1795.981 start   ccw pos 365.0 target  pwm 0
+  1796.011 run     ccw pos 365.0 target  pwm 0
+  1798.748 slow    ccw pos 357.5 target  pwm 253
+   (1.8 queries/s, 159 events, 0 lost)
+  1799.483 cut     ccw pos 355.0 target  pwm 0
+  1799.513 idle        pos 355.0 target  pwm 0
+  1804.682 cmd         pos  target 315.0 pwm 0
+  1804.682 start   ccw pos 355.0 target  pwm 0
+  1804.712 run     ccw pos 355.0 target  pwm 0
+  1810.194 stop    ccw pos 336.5 target  pwm 0
+  1810.194 cut     ccw pos 336.5 target  pwm 0
+   (2.1 queries/s, 236 events, 0 lost)
+  1810.224 idle        pos 336.0 target  pwm 0
+  1815.176 cmd         pos  target 342.0 pwm 0
+  1815.176 start   cw  pos 336.0 target  pwm 0
+  1815.206 run     cw  pos 336.0 target  pwm 0
+  1816.850 slow    cw  pos 339.5 target  pwm 205
+  1817.540 cut     cw  pos 342.0 target  pwm 0
+  1817.570 idle        pos 342.0 target  pwm 0
+   (2.0 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.4 queries/s, 273 events, 0 lost)
+   (2.3 queries/s, 273 events, 0 lost)

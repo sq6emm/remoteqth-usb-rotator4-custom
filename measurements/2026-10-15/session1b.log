@@ -1,0 +1,15 @@
+   1.23 start 355.0 GE 0 PDa508,r0,c1,h3,s0,t0,p0,f490
+   2.50 I short 5: P 360 from 355.0 RPRT 0
+   8.03 I short 5: landed 360.0 (err +0.0)
+   9.30 I short 5 back: P 355 from 360.0 RPRT 0
+  14.86 I short 5 back: landed 355.0 (err +0.0)
+  16.13 I short 10: P 365 from 355.0 RPRT 0
+  23.47 I short 10: landed 365.0 (err +0.0)
+  24.73 I short 10 back: P 355 from 365.0 RPRT 0
+  32.17 I short 10 back: landed 355.0 (err +0.0)
+  33.44 J STOP CCW full speed: P 315 from 355.0 RPRT 0
+  38.96 J STOP CCW full speed: S at 342.0 RPRT 0
+  42.67 J STOP CCW full speed: rest 336.0 (coast 6.0 deg after S)
+  43.93 K back: P 342 from 336.0 RPRT 0
+  49.51 K back: landed 342.0 (err +0.0)
+  51.02 end 342.0 GE 0 PDa618,r0,c1,h3,s0,t0,p0,f490
