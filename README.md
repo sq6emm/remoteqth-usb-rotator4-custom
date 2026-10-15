@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree: the contact is closed for the first 0.79° of each degree and open for the rest. Both edges are counted at their real places, and between edges the position is interpolated from the speed (see *Precision*).
-- **Size:** about 19.9 kB of flash and 1.59 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
+- **Size:** about 20.3 kB of flash and 1.60 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -26,7 +26,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 - **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
-## Precision (1.2)
+## Precision (1.2, 1.3)
 
 The SPID pulse contact gives two edges per degree, but not half a degree apart: it closes at the start of each degree
 and opens 0.79° later (measured on 2026-10-15: 182 ms closed, 48 ms open at full speed). Up to 1.1 every edge counted
@@ -37,19 +37,28 @@ to 0.79° off, plus the coasting after the cut that no edge saw.
 - **Every edge at its real place.** The closing edge is n.0, the opening edge n + 0.8 (register g). Which edge is
   reported depends on the side the rotator crossed it from.
 - **Between edges** the position is the last edge plus speed × time. The speed comes from the stretch just crossed.
-- **The cut anticipates the coasting:** coasting = speed × 180 ms (register h, from the STOP log). The rotator coasts
-  onto the target instead of past it.
+- **The cut anticipates the coasting.** A landing uses speed estimate × 65 ms (register i), a STOP or soft stop speed ×
+  200 ms (register h). Both are fitted to the real event log of 2026-10-15: while slowing down the estimate runs high,
+  so the landing factor is smaller. The rotator coasts onto the target instead of past it.
 - **At rest** the position is the estimated stopping point, to 0.1°. It is always kept between the two edges the
   rotator is known to be between.
 - **Short moves:** a move too short for a speed reading only starts if it can end closer to the target than staying.
 - **Calibration (`CW7`)** keeps fractions. The edge grid moves by `t − position`, whole degrees in the counter and the
   rest in a stored offset. Up to 1.1 a calibration snapped to the 0.5° grid.
 
-In the simulator with the measured contact and coasting, over 80 random gotos in both directions:
-- reported vs. true position: within 0.18° (1.1: 0.79°);
-- true position vs. target: mean 0.08°, at most 0.35° (1.1: mean 0.45°, at most 0.82°).
+1.3 also changes how the PWM may drop. It never falls faster than the soft-stop ramp, even when a target appears close
+while running fast: then the rotator overruns, soft-stops and comes back. Up to 1.2 the slow-down zone applied at once
+(253 → 68 in one step). A direct cut is now allowed up to PWM 110, the range the real landings always cut in.
 
-The 0.35° worst case is a deliberate "stay": a move that short could not land closer. The event log still records
+In the simulator fitted to the real log (contact 0.79; motor response 0.1 s; coasting = inertia + worm friction), over
+80 random gotos in both directions:
+- reported vs. true position: within 0.09° (1.1: 0.79°);
+- true position vs. target: mean 0.06°, at most 0.44° (1.1: mean 0.45°, at most 0.82°).
+
+The worst case is a deliberate "stay". Steps of 1° or less still land within 0.5°: in the soft start the speed is
+not known well enough yet.
+
+The event log still records
 counts (0.5° units): `rotorlog.py` shows them as nominal degrees.
 
 ## Easycomm III
@@ -68,7 +77,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.2`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.3`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
@@ -96,7 +105,8 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | e | Allow PWM above 980 Hz (needs hardware changes, see below) | 0 |
 | f | Park position, degrees | 0 |
 | g | Where the reed contact opens within a degree, degrees (0.1–0.9). Compare with `PD` field `e` (per mille). | 0.8 |
-| h | Coasting after the motor is cut, as a time: coasting distance = speed × this, ms (0–1000) | 180 |
+| h | Coasting after a STOP or soft stop (steady speed): distance = speed × this, ms (0–1000). Real STOP from full speed: 177–223 ms | 200 |
+| i | Coasting after a landing cut (slowing down, so the speed estimate runs high): distance = speed estimate × this, ms. Real landings: 52–75 ms | 65 |
 
 ## PWM frequency and the hardware
 

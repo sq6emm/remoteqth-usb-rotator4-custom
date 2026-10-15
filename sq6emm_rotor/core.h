@@ -25,7 +25,8 @@ struct Settings {             // register
   int16_t  park;              // f (tenths)
   uint8_t  edge_frac;         // g (tenths): where the contact opens within a degree (1.2)
   uint16_t coast_ms;          // h (ms): coasting after the cut = speed x this (1.2)
-  int8_t   pos_off;           // tenths, -5..4: where the edge grid sits within a degree, set by CW7 (1.2; new fields last)
+  int8_t   pos_off;           // tenths, -5..4: where the edge grid sits within a degree, set by CW7 (1.2)
+  uint16_t coast_land_ms;     // i (ms): coasting after a landing cut = the speed estimate x this (1.2; new fields last)
 };
 
 // GS status bits (Easycomm III)
@@ -137,8 +138,8 @@ private:
   int16_t next_edge(int8_t d, int16_t c, int16_t p) const;
   int16_t speed_tps(uint32_t now, uint32_t le) const;                  // tenths/s over the last degree, 0 = unknown
   int16_t pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const;   // last edge + travel since (before the next)
-  void mark_cut(uint32_t now);      // motor current off: remember where and how fast, for the rest position
-  int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false;
+  void mark_cut(uint32_t now, uint16_t coast_ms);   // motor current off: where, how fast, how it will coast
+  int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false; uint16_t coast_cut = 0;
   uint32_t rej_window_ms = 0; uint16_t rej_in_window = 0;
 
   int16_t lo() const { return s.az_min; }

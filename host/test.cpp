@@ -390,8 +390,8 @@ static void test_v12() {
       tgt_err = std::max(tgt_err, std::fabs(s.theta - t)); sum_t += std::fabs(s.theta - t); n++;
     }
     printf("  80 random gotos (both directions): max |fw - true| %.2f, |true - target| max %.2f mean %.2f\n", fw_err, tgt_err, sum_t / n);
-    CHECK(fw_err <= 0.2, "position at rest within 0.2 deg of the truth: %.2f", fw_err);
-    CHECK(tgt_err <= 0.4, "landing within 0.4 deg of the target: %.2f", tgt_err);
+    CHECK(fw_err <= 0.15, "position at rest within 0.15 deg of the truth: %.2f", fw_err);
+    CHECK(tgt_err <= 0.45, "landing within 0.45 deg (worst case: a deliberate stay) of the target: %.2f", tgt_err);
     int16_t d = s.rot.duty_permille();
     printf("  PD duty: %s\n", s.send("PD\n").c_str());
     CHECK(d >= 770 && d <= 810, "measured closed share %d permille (sim 790)", d);

@@ -23,7 +23,7 @@ struct Sim {
   double theta = 0, omega = 0;        // true antenna azimuth (deg, continuous) and speed (deg/s)
   int8_t relay = 0; uint8_t pwm = 0; bool brake = false; uint16_t hz = 490;
   bool jam = false;
-  double u_start = 0.24, tau = 0.30, tau_coast = 0.18;   // coasting: measured from the real STOP log   // speed per PWM: motor.h (measured)
+  double u_start = 0.24, tau = 0.10, tau_coast = 0.5, fric = 6.0;   // coasting: inertia + worm friction, fitted to the real log   // speed per PWM: motor.h (measured)
   // contact
   double duty = 0.79;                  // measured 2026-10-15: 182 ms closed / 48 ms open at full speed
   double chatter_prob = 0.0;           // probability of chatter after a real edge
@@ -69,8 +69,9 @@ struct Sim {
       double target = relay * motor_speed(pwm);
       omega += (target - omega) * dt / tau;
     } else {
-      omega -= omega * dt / tau_coast;
-      if (std::fabs(omega) < 0.3) omega = 0;     // worm gear friction stops the last bit at once
+      double dec = omega / tau_coast + (omega > 0 ? fric : -fric);   // 4.6 deg/s -> 0.9 deg, 2 deg/s -> 0.23 deg
+      double nw = omega - dec * dt;
+      omega = (nw > 0) != (omega > 0) || std::fabs(nw) < 0.02 ? 0 : nw;
     }
     theta += omega * dt;
   }
@@ -141,6 +142,11 @@ void hw_pwm(uint8_t d) {
     if (d - s.last_pwm > s.max_up_step) s.max_up_step = d - s.last_pwm;
   }
   if (d == 0 && s.last_pwm > 110 && !s.allow_hard_cut && s.us >= s.hard_cut_until) s.violate("hard cut from high PWM (no soft stop)");
+  if (d && d < s.last_pwm) {                         // slowing down: never faster than the soft stop ramp
+    uint64_t dt = s.us - s.last_pwm_us;
+    int allowed = (int)(dt / 1000.0 * 255.0 / s.rot.s.ramp_down) + 2;
+    if (s.last_pwm - d > allowed) s.violate("PWM drop faster than the soft stop ramp");
+  }
   if (d && !s.relay) s.violate("PWM without a relay");
   s.pwm = d; s.last_pwm = d; s.last_pwm_us = s.us;
 }

@@ -151,9 +151,9 @@ struct Bench {
     int rel = relay_cw ? 1 : (relay_ccw ? -1 : 0);
     if (rel && duty > 0.01) {
       if (std::fabs(omega) < 0.02 && duty < 0.24) omega = 0;
-      else { double tgt = rel * motor_speed((uint8_t)(duty * 255 + 0.5)); omega += (tgt - omega) * dt / 0.30; }
+      else { double tgt = rel * motor_speed((uint8_t)(duty * 255 + 0.5)); omega += (tgt - omega) * dt / 0.10; }
     } else {
-      omega -= omega * dt / 0.18; if (std::fabs(omega) < 0.3) omega = 0;   // measured coasting, friction stop
+      { double nw = omega - (omega / 0.5 + (omega > 0 ? 6.0 : -6.0)) * dt; omega = (nw > 0) != (omega > 0) || std::fabs(nw) < 0.02 ? 0 : nw; }   // coasting as host/sim.h
     }
     theta += omega * dt;
     set_pd2();
@@ -226,7 +226,7 @@ int main() {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.2", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.3", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -377,7 +377,7 @@ int main() {
     uint8_t sl[5] = {685 & 0xFF, 685 >> 8, 7, 0, 0}; sl[4] = Bench::crc8(sl, 4);   // 685 counts = 342.5 deg
     memcpy(&img[256], sl, 5);
     Bench o; o.boot(img, 342.5); o.run_ms(1000);
-    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRg") == "CRg,0.8" && o.cmd("CRh") == "CRh,180" && o.ee(130) == 2,
+    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRg") == "CRg,0.8" && o.cmd("CRh") == "CRh,200" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
           "settings kept (%s), new registers default (%s %s), image now version %d", o.cmd("CR5").c_str(), o.cmd("CRg").c_str(), o.cmd("CRh").c_str(), o.ee(130));
     CHECK(o.cmd("AR") == "AR342.5" && o.cmd("GE") == "GE0", "old slot 685 counts -> %s %s", o.cmd("AR").c_str(), o.cmd("GE").c_str());
     o.cmd("AZ346.0");

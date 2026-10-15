@@ -11,7 +11,7 @@ void Rotor::defaults() {
   s.az_min = DEF_AZ_MIN;     s.az_max = DEF_AZ_MAX;
   s.ramp_up = DEF_RAMP_UP;   s.ramp_down = DEF_RAMP_DOWN; s.slow_zone = DEF_SLOW_ZONE;
   s.report_raw = DEF_REPORT_RAW; s.overshoot = DEF_OVERSHOOT; s.jam = DEF_JAM; s.endpoints = DEF_ENDPOINTS;
-  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK; s.edge_frac = DEF_EDGE_FRAC; s.coast_ms = DEF_COAST_MS; s.pos_off = 0;
+  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK; s.edge_frac = DEF_EDGE_FRAC; s.coast_ms = DEF_COAST_MS; s.pos_off = 0; s.coast_land_ms = DEF_COAST_LAND_MS;
 }
 
 void Rotor::set_clamps() {
@@ -25,7 +25,7 @@ bool settings_ok(const Settings &s) {
          s.az_min >= -3600 && s.az_min <= 0 && s.az_max >= 3600 && s.az_max <= 7200 && s.az_max - s.az_min >= 3600 &&
          s.ramp_up >= 100 && s.ramp_up <= 10000 && s.ramp_down >= 100 && s.ramp_down <= 10000 && s.slow_zone <= 300 &&
          s.report_raw <= 1 && s.overshoot <= 1 && s.jam <= 1 && s.endpoints <= 1 && s.fast_pwm <= 1 &&
-         s.park >= s.az_min && s.park <= s.az_max && s.edge_frac >= 1 && s.edge_frac <= 9 && s.coast_ms <= 1000 && s.pos_off >= -5 && s.pos_off <= 4;
+         s.park >= s.az_min && s.park <= s.az_max && s.edge_frac >= 1 && s.edge_frac <= 9 && s.coast_ms <= 1000 && s.pos_off >= -5 && s.pos_off <= 4 && s.coast_land_ms <= 1000;
 }
 
 void Rotor::begin(uint32_t now) {
@@ -162,11 +162,11 @@ int16_t Rotor::pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const {
   return p + d * (int16_t)x;
 }
 
-void Rotor::mark_cut(uint32_t now) {
+void Rotor::mark_cut(uint32_t now, uint16_t coast_ms) {
   uint32_t le = last_edge(now);
   int8_t d = drive_dir;
   v_cut = d ? speed_tps(now, le) : 0;
-  est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0;
+  est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0; coast_cut = coast_ms;
 }
 
 int16_t Rotor::duty_permille() const {
@@ -224,7 +224,7 @@ void Rotor::soft_stop() {
 
 void Rotor::stop_now() {
   want = false; mode = M_NONE; holding = false;
-  if (pwm_now) mark_cut(t_tick);
+  if (pwm_now) mark_cut(t_tick, s.coast_ms);
   hw_pwm(0); pwm_now = 0; ramp_acc = 0;
   log_ev(E_STOP, t_tick);
   if (st != S_IDLE && st != S_RELAY_OFF) set_state(S_RELAY_OFF, t_tick);
@@ -360,7 +360,7 @@ void Rotor::tick(uint32_t now) {
     }
     if (est_pending && (now - t_idle) >= COAST_MIN_MS && (now - le) >= QUIET_MS) {   // at rest: where between the edges
       est_pending = false;
-      int16_t e = est_cut + dir_cut * (int16_t)((int32_t)v_cut * s.coast_ms / 1000);
+      int16_t e = est_cut + dir_cut * (int16_t)((int32_t)v_cut * coast_cut / 1000);
       ATOMIC_BEGIN
         int16_t lo_e = edge_t(cnt), hi_e = edge_t(cnt + 1);
         if (e < lo_e) e = lo_e;
@@ -408,8 +408,8 @@ void Rotor::tick(uint32_t now) {
     uint8_t c = cap(), w = c;
     int16_t v = speed_tps(now, le);               // known from the 3rd edge of the run: then the cut anticipates
     int16_t pe = pos_est(mdir, v, now, le);       // the position between edges and the coasting after the cut
-    int16_t coast = (int16_t)((int32_t)v * s.coast_ms / 1000);
-    int16_t close = v ? 0 : tol(mdir);
+    int16_t coast = (int16_t)((int32_t)v * s.coast_land_ms / 1000);   // a landing: slowing down, the estimate lags
+    int16_t close = v ? 0 : tol(mdir) + SHORT_COAST_T;   // no speed yet: stop where the coasting ends nearest
     if (mode == M_TARGET) {
       int16_t d = (tgt - pe) * mdir - coast;      // remaining distance in the direction of travel, after coasting
       if (d <= close) {                            // reached (or passed): the next edge would not be closer
@@ -418,7 +418,7 @@ void Rotor::tick(uint32_t now) {
           set_state(S_SOFT, now);
           break;
         }
-        mark_cut(now);
+        mark_cut(now, s.coast_land_ms);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;      // normal case: the slow-down left us at the floor PWM
         set_state(S_RELAY_OFF, now);
         break;
@@ -434,7 +434,7 @@ void Rotor::tick(uint32_t now) {
         log_ev(E_LIMIT, now);
         mode = M_NONE; want = false;
         if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) { set_state(S_SOFT, now); break; }
-        mark_cut(now);
+        mark_cut(now, s.coast_land_ms);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;
         set_state(S_RELAY_OFF, now);
         break;
@@ -445,7 +445,13 @@ void Rotor::tick(uint32_t now) {
     if (acc > 65280UL) acc = 65280UL;
     ramp_acc = (uint16_t)acc;
     uint8_t r = ramp_acc >> 8;
-    if (w < r) { r = w; ramp_acc = (uint16_t)r << 8; }   // distance-based slow-down applies at once
+    if (w < r) {                                   // distance-based slow-down, never faster than the soft stop ramp:
+      uint16_t dn = (uint16_t)(dt * 65280UL / s.ramp_down);   // a target that appears close while running fast is
+      uint16_t now_acc = (uint16_t)pwm_now << 8, w_acc = (uint16_t)w << 8;   // overrun, then soft stop and come back
+      ramp_acc = now_acc > w_acc + dn ? now_acc - dn : (now_acc > w_acc ? w_acc : now_acc);
+      if ((ramp_acc >> 8) > r) ramp_acc = (uint16_t)r << 8;
+      r = ramp_acc >> 8;
+    }
     if (w < c && !slow_logged) { slow_logged = true; log_ev(E_SLOW, now); }
     if (r != pwm_now) { pwm_now = r; hw_pwm(r); }
     break;
@@ -456,7 +462,7 @@ void Rotor::tick(uint32_t now) {
     ramp_acc = ramp_acc > dec ? ramp_acc - dec : 0;
     uint8_t r = ramp_acc >> 8;
     if (r <= s.pwm_floor) {
-      mark_cut(now);
+      mark_cut(now, s.coast_ms);
       hw_pwm(0); pwm_now = 0; ramp_acc = 0;
       set_state(S_RELAY_OFF, now);
     } else if (r != pwm_now) {
@@ -543,6 +549,7 @@ bool Rotor::reg_read(char r, char *out) const {
   case 'f': fmt_tenths(out, s.park); break;
   case 'g': fmt_tenths(out, s.edge_frac); break;
   case 'h': fmt_u32(out, s.coast_ms); break;
+  case 'i': fmt_u32(out, s.coast_land_ms); break;
   default: return false;
   }
   return true;
@@ -550,7 +557,7 @@ bool Rotor::reg_read(char r, char *out) const {
 
 bool Rotor::reg_write(char r, const char *val) {
   bool ok; int32_t v = 0; int16_t t = 0;
-  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c' || r == 'g' || r == 'h')) return false;   // range / position only at rest
+  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c' || r == 'g' || r == 'h' || r == 'i')) return false;   // range / position only at rest
   bool angle = (r == '3' || r == '4' || r == '7' || r == '8' || r == 'f' || r == 'g');
   if (angle) { t = parse_tenths(val, &ok); if (!ok) return false; }
   else if (!parse_int(val, &v)) return false;
@@ -581,6 +588,7 @@ bool Rotor::reg_write(char r, const char *val) {
   case 'f': if (t < s.az_min || t > s.az_max) return false; s.park = t; break;
   case 'g': if (t < 1 || t > 9) return false; s.edge_frac = t; set_raw(pos()); break;
   case 'h': if (v < 0 || v > 1000) return false; s.coast_ms = v; break;
+  case 'i': if (v < 0 || v > 1000) return false; s.coast_land_ms = v; break;
   default: return false;
   }
   settings_dirty = true;
