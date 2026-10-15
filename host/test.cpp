@@ -443,7 +443,32 @@ static void test_v15() {
   CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
 }
 
+static void test_review15() {
+  printf("own review of 1.2-1.5: CW7 right after a stop, long main-loop passes at full speed\n");
+  {
+    Sim s(150.0);
+    s.send("AZ160.3\n");
+    s.run_until([&] { return !s.rot.moving() && s.omega == 0; }, 60000);
+    s.run(150);                                         // stopped, rest estimate still pending
+    char b[32]; snprintf(b, sizeof b, "CW7,%.1f\n", s.theta); s.send(b);   // calibrate to the truth at once
+    s.run(3000);
+    s.send("AZ170\n"); s.run_until([&] { return !s.rot.moving() && s.omega == 0; }, 60000); s.run(2500);
+    printf("  CW7 150 ms after the stop, then a move: fw %.2f true %.2f\n", s.fw_pos(), s.theta);
+    CHECK(std::fabs(s.fw_pos() - s.theta) <= 0.15, "calibration right after a stop holds (fw - true %.2f)", s.fw_pos() - s.theta);
+  }
+  {
+    Sim s(20.0);
+    s.loop_ms = 20;                                     // 20 ms main-loop passes (an EEPROM write takes ~17 ms)
+    s.send("AZ200\n"); s.run(8000);
+    int lo = 255; for (int i = 0; i < 100; i++) { s.run(20); if (s.pwm < lo) lo = s.pwm; }
+    printf("  20 ms loop passes at full speed: lowest PWM over 2 s %d\n", lo);
+    CHECK(lo >= 250 && s.violations == 0, "full speed holds with long passes (lowest PWM %d, violations %d: %s)", lo, s.violations, s.last_violation.c_str());
+    s.allow_hard_cut = true; s.send("SA\n"); s.run(2000);
+  }
+}
+
 int main() {
+  test_review15();
   test_v15();
   test_v12();
   test_v11();

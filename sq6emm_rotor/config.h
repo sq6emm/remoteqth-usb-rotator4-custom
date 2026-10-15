@@ -3,7 +3,7 @@
 // motor-side reed pulses (1 pulse per degree, both edges counted = 0.5 deg).
 #pragma once
 
-#define FW_VERSION "SQ6EMM-rotor-1.5"
+#define FW_VERSION "SQ6EMM-rotor-1.6"
 
 // ---- pins (RemoteQTH 4.0.3, see docs/Rotator-Interface-4.0.3.pdf) ----
 #define PIN_PULSE      2    // PD2, PULSE-CCW line from the rotator (10k pull-up, 1k/100n/1k + BAV99); contact closed = low

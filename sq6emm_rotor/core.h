@@ -144,6 +144,7 @@ private:
   int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false; uint16_t coast_cut = 0;
   uint32_t t_cut = 0;
   int16_t in_stretch(int16_t e) const;   // clamp an estimate into the stretch the rotator is known to be in
+  void finish_rest();               // apply a pending rest estimate now
   uint32_t rej_window_ms = 0; uint16_t rej_in_window = 0;
 
   int16_t lo() const { return s.az_min; }

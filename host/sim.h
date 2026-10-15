@@ -93,10 +93,11 @@ struct Sim {
   }
 
   // run for t milliseconds: physics every 50 us, firmware loop every 1 ms
+  uint32_t loop_ms = 1;                  // main-loop pass length (EEPROM writes / LCD make real passes longer)
   void run(uint32_t t_ms) {
-    for (uint32_t i = 0; i < t_ms; i++) {
+    for (uint32_t i = 0; i < t_ms; i += loop_ms) {
       uint32_t now = ms();                 // like loop(): 'now' is taken first, pulses arrive while the pass runs
-      for (int k = 0; k < 20; k++) step(50);
+      for (uint32_t k = 0; k < 20 * loop_ms; k++) step(50);
       rot.tick(now);
       if (relay && rot.dir() != relay) { if (!dir_mismatch) violate("core direction differs from the energised relay"); dir_mismatch = true; }
       if (rot.save_due(now, false)) rot.saved(rot.pos());

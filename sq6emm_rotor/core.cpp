@@ -169,6 +169,14 @@ void Rotor::mark_cut(uint32_t now, uint16_t coast_ms) {
   est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0; coast_cut = coast_ms; t_cut = now;
 }
 
+// the rest position: where between the two edges around it the coasting ended (estimate from the cut)
+void Rotor::finish_rest() {
+  if (!est_pending) return;
+  est_pending = false;
+  int16_t e = in_stretch(est_cut + dir_cut * (int16_t)((int32_t)v_cut * coast_cut / 1000));
+  ATOMIC_BEGIN pt = e; ATOMIC_END
+}
+
 int16_t Rotor::duty_permille() const {
   uint32_t s1, s0; uint16_t n1, n0;
   ATOMIC_BEGIN s1 = dsum[1]; s0 = dsum[0]; n1 = dn[1]; n0 = dn[0]; ATOMIC_END
@@ -261,7 +269,8 @@ void Rotor::stop_now() {
 }
 
 void Rotor::set_position(int16_t t) {
-  int16_t p = pos();
+  finish_rest();                                   // a CW7 right after a stop: calibrate against the rest point, and
+  int16_t p = pos();                               // keep the pending estimate (old frame) from overwriting it later
   if (t >= 0 && t < 3600 && !(errors & ER_NOPOS)) {   // keep the current turn (unknown position: take t as it is)
     int16_t best = t;
     for (int8_t k = -1; k <= 1; k += 2) {
@@ -388,11 +397,7 @@ void Rotor::tick(uint32_t now) {
       set_state(S_RELAY_ON, now);
       break;
     }
-    if (est_pending && (now - t_idle) >= COAST_MIN_MS && (now - le) >= QUIET_MS) {   // at rest: where between the edges
-      est_pending = false;
-      int16_t e = in_stretch(est_cut + dir_cut * (int16_t)((int32_t)v_cut * coast_cut / 1000));
-      ATOMIC_BEGIN pt = e; ATOMIC_END
-    }
+    if (est_pending && (now - t_idle) >= COAST_MIN_MS && (now - le) >= QUIET_MS) finish_rest();   // at rest
     if (brake_on && (now - t_idle) >= BRAKE_HOLD_MS) { hw_brake(false); brake_on = false; }
     // one correction move after an overshoot (register a), once the coasting is over
     if (s.overshoot && mode == M_TARGET && !corrected && (now - le) > 500 && (now - t_idle) > 500 &&
@@ -469,9 +474,9 @@ void Rotor::tick(uint32_t now) {
     ramp_acc = (uint16_t)acc;
     uint8_t r = ramp_acc >> 8;
     if (w < r) {                                   // distance-based slow-down, never faster than the soft stop ramp:
-      uint16_t dn = (uint16_t)(dt * 65280UL / s.ramp_down);   // a target that appears close while running fast is
-      uint16_t now_acc = (uint16_t)pwm_now << 8, w_acc = (uint16_t)w << 8;   // overrun, then soft stop and come back
-      ramp_acc = now_acc > w_acc + dn ? now_acc - dn : (now_acc > w_acc ? w_acc : now_acc);
+      uint32_t dn = dt * 65280UL / s.ramp_down;     // a target that appears close while running fast is overrun, then
+      uint32_t now_acc = (uint32_t)pwm_now << 8, w_acc = (uint32_t)w << 8;   // soft stop and come back (32 bit: a long
+      ramp_acc = (uint16_t)(now_acc > w_acc + dn ? now_acc - dn : (now_acc > w_acc ? w_acc : now_acc));   // pass overflowed)
       if ((ramp_acc >> 8) > r) ramp_acc = (uint16_t)r << 8;
       r = ramp_acc >> 8;
     }
