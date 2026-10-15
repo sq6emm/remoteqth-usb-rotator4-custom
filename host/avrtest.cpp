@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.6", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.7", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -260,7 +260,7 @@ int main(int argc, char **argv) {
   char azs[12]; snprintf(azs, sizeof azs, "%.1f", b.fw_az());
   CHECK(b.lcd_line(0).find(azs) != std::string::npos && b.lcd_line(1).find("On target") == 0, "LCD shows the position %s and 'On target'", azs);
   int fl = -1; int pos_t = b.ring_newest(&fl); float mirror; uint8_t m[4] = {b.ee(9), b.ee(10), b.ee(11), b.ee(12)}; memcpy(&mirror, m, 4);
-  CHECK(pos_t == (int)lround(b.fw_az() * 10) && fl == 2 && std::fabs(mirror - pos_t / 10.0f) < 0.01f,
+  CHECK(pos_t == (int)lround(b.fw_az() * 10) && (fl & 3) == 2 && (fl & 0x40) && std::fabs(mirror - pos_t / 10.0f) < 0.01f,
         "EEPROM: newest ring slot %d tenths (flags %d = tenths), K3NG mirror %.1f", pos_t, fl, mirror);
   b.run_ms(2000);
   CHECK(b.brake == 0, "brake engaged again after the hold time");
@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
   printf("== reset (DTR / watchdog / brown-out) during a move\n");
   b.cmd("AZ230"); b.run_ms(4000);
   int fl2 = -1; int during = b.ring_newest(&fl2);
-  CHECK(fl2 == 3 && std::abs(during - 2150) <= 3, "MOVING slot written at the start: %d tenths, flags %d (moving + tenths)", during, fl2);
+  CHECK((fl2 & 3) == 3 && std::abs(during - 2150) <= 3, "MOVING slot written at the start: %d tenths, flags %d (moving + tenths)", during, fl2);
   double true_at_reset = b.theta;
   avr_reset(b.avr);
   b.reapply_inputs();                                // simavr clears the external pin levels on reset
@@ -352,7 +352,8 @@ int main(int argc, char **argv) {
   printf("== totals\n");
   CHECK(b.violations == 0, "hardware rules: %d violations %s", b.violations, b.last_violation.c_str());
   CHECK(b.resets == 2, "boots: %d (power-up + the deliberate reset; a watchdog or crash reset would add more)", b.resets);
-  int ram_end = 0x8FF, free_min = b.sp_min - 0x100 - 1506 + 1;   // SRAM 0x100..0x8FF, .data+.bss = 1506 bytes
+  int vars = (int)(b.fw.datasize + b.fw.bsssize);                // .data + .bss from the ELF (was a fixed number)
+  int ram_end = 0x8FF, free_min = b.sp_min - 0x100 - vars + 1;   // SRAM 0x100..0x8FF
   printf("  lowest SP 0x%03X -> at least %d bytes never touched between the variables and the stack\n", b.sp_min, free_min);
   CHECK(free_min > 200, "stack margin %d bytes", free_min);
   (void)ram_end;
@@ -424,6 +425,35 @@ int main(int argc, char **argv) {
     avr_reset(o.avr); o.reapply_inputs(); o.run_ms(9000);        // and again when rotctld opens it
     CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRh") == "CRh,180" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
           "1.2 image after two early resets: %s %s %s, written as version %d after 8 s", o.cmd("CR5").c_str(), o.cmd("CRh").c_str(), o.cmd("CRi").c_str(), o.ee(130));
+  }
+
+  printf("== 1.7: 'position uncertain' survives further resets until CW7 (Fable review finding 2)\n");
+  {
+    Bench u; u.boot(k3ng_eeprom(91.0f), 91.0); u.run_ms(1500);
+    u.cmd("AZ130"); u.run_ms(5000);
+    avr_reset(u.avr); u.reapply_inputs(); u.run_ms(3500);
+    std::string g2 = u.cmd("GE");
+    avr_reset(u.avr); u.reapply_inputs(); u.run_ms(3500);             // e.g. rotctld reopening the port
+    std::string g3 = u.cmd("GE");
+    CHECK(g2 == "GE64" && g3 == "GE64", "reset during a move: GE after the 1st reboot %s, after the 2nd %s", g2.c_str(), g3.c_str());
+    char b[24]; snprintf(b, sizeof b, "CW7,%.1f", u.theta); u.cmd(b); u.run_ms(3500);
+    avr_reset(u.avr); u.reapply_inputs(); u.run_ms(1500);
+    CHECK(u.cmd("GE") == "GE0" && std::fabs(u.fw_raw() - u.theta) <= 0.3, "after CW7 and a reset: %s, AR %.1f (true %.2f)", u.cmd("GE").c_str(), u.fw_raw(), u.theta);
+  }
+
+  printf("== 1.7: the grid offset travels with the position (settings block destroyed)\n");
+  {
+    Bench c; c.boot(k3ng_eeprom(100.0f), 100.0); c.run_ms(1500);
+    c.cmd("AZ105"); c.run_until([&] { return c.idle(); }, 30000); c.run_ms(2000);
+    char b[24]; snprintf(b, sizeof b, "CW7,%.1f", c.theta + 0.3); c.cmd(b);   // calibrate 0.3 off the grid
+    c.run_ms(10000);                                                  // settings (8 s) and position written
+    std::vector<uint8_t> img(1024); for (int i = 0; i < 1024; i++) img[i] = c.ee(i);
+    img[131] ^= 0x5A;                                                 // the settings image is now invalid
+    double th = c.theta;
+    Bench d; d.boot(img, th); d.run_ms(1500);
+    d.cmd("AZ110"); d.run_until([&] { return d.idle(); }, 30000); d.run_ms(2000);
+    double off = d.fw_raw() - d.theta;
+    CHECK(std::fabs(off - 0.3) <= 0.2, "after a move the calibration offset is still %.2f (want 0.30), settings came back as defaults", off);
   }
 
   printf("== buttons held at power-up (short / water) never start a move\n");

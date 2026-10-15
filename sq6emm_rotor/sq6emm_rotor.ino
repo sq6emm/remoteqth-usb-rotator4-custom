@@ -34,6 +34,8 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 #define EE_SLOT             5      // pos lo, pos hi, seq, flags, crc
 #define SLOT_MOVING         1
 #define SLOT_TENTHS         2      // 1.2: the value is the position in tenths (before: 0.5 deg counts)
+#define SLOT_OFF         0x40      // 1.7: bits 2..5 = pos_off + 5 (the grid offset travels with the position: a torn
+                                   // settings write can no longer shift the grid silently)
 #define MIRROR_EVERY_MS     600000UL   // the K3NG mirror is refreshed at most every 10 min (and after CW7)
 #define SETTINGS_BOOT_MS    8000UL     // converted / default settings are written only after this much uptime:
                                        // avrdude closing the port and rotctld opening it reset the MCU (DTR) right
@@ -82,7 +84,8 @@ static bool slot_read(uint8_t i, int16_t *c, uint8_t *seq, uint8_t *flags) {
 }
 
 static void slot_write(int16_t c, uint8_t flags) {
-  flags |= SLOT_TENTHS;
+  flags |= SLOT_TENTHS | SLOT_OFF | (uint8_t)(((rot.s.pos_off + 5) & 0x0F) << 2);
+  if (rot.errors & ER_UNCERT) flags |= SLOT_MOVING;   // "position uncertain" survives every reset until CW7
   uint8_t b[EE_SLOT] = {(uint8_t)c, (uint8_t)(c >> 8), ring_seq, flags, 0};
   b[4] = crc8(b, 4);
   for (uint8_t k = 0; k < EE_SLOT; k++) EEPROM.update(EE_RING_ADDR + ring_next * EE_SLOT + k, b[k]);
@@ -110,7 +113,13 @@ static uint8_t load_position() {
     if (!any || (int8_t)(seq - bseq) > 0) { any = true; best = i; bseq = seq; bflags = flags; bc = c; }
   }
   if (any) {
-    rot.set_raw(bflags & SLOT_TENTHS ? bc : bc * 5); ring_next = (best + 1) % EE_RING_SLOTS; ring_seq = bseq + 1; ring_moving = bflags & SLOT_MOVING;
+    if (bflags & SLOT_OFF) {                       // the grid offset stored with the position wins over the settings
+      int8_t o = (int8_t)((bflags >> 2) & 0x0F) - 5;
+      if (o >= -5 && o <= 4 && o != rot.s.pos_off) { rot.s.pos_off = o; rot.settings_dirty = true; }
+    }
+    int16_t t = bflags & SLOT_TENTHS ? bc : bc * 5;
+    if (t < rot.s.az_min - POS_MARGIN_T || t > rot.s.az_max + POS_MARGIN_T) return 0;   // impossible value: no position
+    rot.set_raw(t); ring_next = (best + 1) % EE_RING_SLOTS; ring_seq = bseq + 1; ring_moving = bflags & SLOT_MOVING;
     return ring_moving ? 2 : 1;
   }
   if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC) {          // first start after the K3NG firmware
@@ -327,7 +336,7 @@ void loop() {
   buttons(now);
   rot.tick(now);
   if (rot.driving() && !ring_moving && !(rot.errors & ER_NOPOS)) slot_write(rot.pos(), SLOT_MOVING);
-  if (rot.save_due(now, ring_moving)) save_position(now);
+  if (rot.save_due(now, ring_moving && !(rot.errors & ER_UNCERT))) save_position(now);   // uncertain: slots keep MOVING
   if (rot.settings_dirty && now >= SETTINGS_BOOT_MS) { save_settings(); rot.settings_dirty = false; }
   static uint32_t t_lcd = 0;
   if (now - t_lcd >= 250) { t_lcd = now; display(); }

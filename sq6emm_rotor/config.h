@@ -3,7 +3,7 @@
 // motor-side reed pulses (1 pulse per degree, both edges counted = 0.5 deg).
 #pragma once
 
-#define FW_VERSION "SQ6EMM-rotor-1.6"
+#define FW_VERSION "SQ6EMM-rotor-1.7"
 
 // ---- pins (RemoteQTH 4.0.3, see docs/Rotator-Interface-4.0.3.pdf) ----
 #define PIN_PULSE      2    // PD2, PULSE-CCW line from the rotator (10k pull-up, 1k/100n/1k + BAV99); contact closed = low
@@ -41,12 +41,13 @@
 #define SOFT_CUT_MARGIN      46   // reaching a target / range end above floor + this PWM (110): soft stop instead of a cut (real landings cut at 77..109)
 #define BRAKE_HOLD_MS      3000   // brake released (RL3 / START LED) until this long after the motor stopped
 #define SAVE_AFTER_MS      1000   // position saved to EEPROM this long after the last pulse while idle
+#define EDGE_MIN_MS          20   // two pulse edges closer than this are an EMI burst (narrowest real stretch: ~45 ms)
 #define SHORT_COAST_T         2   // a move too short to know its speed coasts about 0.2 deg past the edge where it stops
 #define LIMIT_ZONE_T         50   // manual moves / range ends: slow down over the last 5 deg
 #define SLOW_PWM_CAP        200   // slow-down ramps start at most at this PWM
 #define OVERSHOOT_T          10   // overshoot correction (register a) when off target by >= 1.0 deg
 #define POS_MARGIN_T        150   // the counter keeps counting 15 deg beyond the range (never loses pulses)
-#define LOG_N                64   // event log entries (8 bytes each), read with LG<seq>
+#define LOG_N                48   // event log entries (8 bytes each), read with LG<seq> (48 since 1.7: stack headroom)
 #define LOG_SAMPLE_MS       100   // while the motor is driven: a PWM/position sample if nothing else was logged
 #define LG_REPLY_MAX        118   // LG reply length limit incl. "\r\n": rotctld cuts raw 'w' replies at 127 chars
 

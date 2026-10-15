@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree: the contact is closed for the first 0.79° of each degree and open for the rest. Both edges are counted at their real places, and between edges the position is interpolated from the speed (see *Precision*).
-- **Size:** about 20.8 kB of flash and 1.60 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
+- **Size:** about 22.2 kB of flash and 1.50 kB of RAM (event log 48 entries since 1.7) (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 320 bytes to spare (measured in simavr from the ELF's .data + .bss).
 
 ## What it does
 
@@ -26,7 +26,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 - **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
-## Precision (1.2 – 1.5)
+## Precision (1.2 – 1.7)
 
 The SPID pulse contact gives two edges per degree, but not half a degree apart: it closes at the start of each degree
 and opens 0.79° later (measured on 2026-10-15: 182 ms closed, 48 ms open at full speed). Up to 1.1 every edge counted
@@ -65,6 +65,23 @@ not known well enough yet.
 The event log still records
 counts (0.5° units): `rotorlog.py` shows them as nominal degrees.
 
+### Robustness (1.7, from the independent review)
+
+- **Slowing down follows register 6** at the configured rate. Up to 1.6 the target and range-end slow-down dropped
+  about 1 PWM per main-loop pass (≈1000 PWM/s) whatever register 6 said. The slow-down now also starts early enough
+  for the configured ramp at the present speed. The range end holds even with ramp_down 10000 (simulator: 390.06).
+- **Self-healing counter.** Even stretch = contact closed is checked at every edge. A missed edge (for example a
+  glitch in the boot read) is counted at the next edge, and `PD` field `y` counts these repairs.
+- **Interference bursts** of 3 ms or more produced two edges closer than any real stretch (at least 45 ms). Such a pair
+  is undone (`PD` field `z`); before, it counted +1.0° and gave an absurd speed.
+- **"Position uncertain" (`GE` 64) survives every reset until `CW7`.** Before, it survived only one boot.
+- **The calibration offset is stored with every position slot.** A torn settings write can no longer shift the edge
+  grid silently.
+- **Stored positions outside the range are rejected**, so the controller comes up with "no position".
+- **The interrupt state is read as one snapshot per pass.** A pulse arriving between separate reads could make a
+  landing cut early.
+- **No relay click without motion:** a short move, once started, runs to its first edge.
+
 ## Easycomm III
 
 Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib sends `GS\n;`. Queries are answered as `<cmd><value>\r\n`. Set commands get no reply.
@@ -81,7 +98,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.5`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.7`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |

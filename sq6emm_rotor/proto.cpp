@@ -131,6 +131,8 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
     put(",p"); put_u32(rot.pwm_now); put(",f"); put_u32(rot.pwm_hz);
     int16_t d = rot.duty_permille();                // measured contact closed share of a degree, per mille
     put(",e"); if (d < 0) put("-"); else put_u32((uint32_t)d);
+    uint16_t y, z; ATOMIC_BEGIN y = rot.n_resync; z = rot.n_burst; ATOMIC_END
+    put(",y"); put_u32(y); put(",z"); put_u32(z);   // parity repairs (missed edges), edge pairs undone as bursts
     return;
   }
 }

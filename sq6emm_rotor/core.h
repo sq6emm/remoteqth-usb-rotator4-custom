@@ -67,6 +67,7 @@ public:
   volatile uint8_t  pend_n = 0;      // samples the line has differed from last_level
   volatile uint16_t edge_dt[2] = {0, 0};   // the last two intervals between accepted edges (ms)
   volatile uint32_t n_acc = 0, n_rej = 0, n_coast = 0;
+  volatile uint16_t n_resync = 0, n_burst = 0;   // counter parity healed after a missed edge / edge pairs undone as a burst
   uint16_t n_holds = 0, n_stalls = 0, n_timeouts = 0;
 
   LogRec logbuf[LOG_N];
@@ -136,10 +137,16 @@ private:
   int16_t saved_pt = 0; bool has_saved = false;
   uint8_t pwm_edge = 0;             // PWM at the previous edge (duty measurement only at steady PWM)
   int16_t stretch(int16_t t, uint8_t level) const;
-  int16_t tol(int8_t d) const;      // stop tolerance in direction d (tenths), when the speed is not known
+  // one consistent copy of what the pulse interrupt owns (an edge between separate reads mixed old and new values)
+  struct Snap { int16_t c, p; uint16_t a; uint8_t n; int8_t d; uint32_t le; };
+  Snap snap(uint32_t now) const;
+  int16_t tol(const Snap &n, int8_t d) const;      // stop tolerance in direction d (tenths), when the speed is not known
   int16_t next_edge(int8_t d, int16_t c, int16_t p) const;
-  int16_t speed_tps(uint32_t now, uint32_t le) const;                  // tenths/s over the last degree, 0 = unknown
-  int16_t pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const;   // last edge + travel since (before the next)
+  int16_t speed_tps(const Snap &n, uint32_t now) const;                  // tenths/s over the stretch just crossed, 0 = unknown
+  int16_t pos_est(const Snap &n, int8_t d, int16_t v, uint32_t now) const;   // last edge + travel since (before the next)
+  // the state before the last accepted edge: a second edge sooner than EDGE_MIN_MS undoes both (EMI burst)
+  volatile int16_t u_cnt = 0, u_pt = 0; volatile uint16_t u_dt0 = 0, u_dt1 = 0; volatile uint32_t u_le = 0;
+  volatile uint8_t u_re = 0; volatile bool u_ok = false;
   void mark_cut(uint32_t now, uint16_t coast_ms);   // motor current off: where, how fast, how it will coast
   int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false; uint16_t coast_cut = 0;
   uint32_t t_cut = 0;

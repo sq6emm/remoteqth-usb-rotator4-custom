@@ -467,7 +467,58 @@ static void test_review15() {
   }
 }
 
+static void test_fable17() {
+  printf("Fable review (1.7): ramp-down rate, relay click without motion, parity heal, EMI burst, long ramp_down\n");
+  for (int rd : {1000, 4000}) {                        // finding 1: the S_RUN slow-down follows register 6
+    Sim s(100.0);
+    char b[32]; snprintf(b, sizeof b, "CW6,%d\n", rd); s.send(b); s.send("CW8,30.0\n");
+    s.send("AZ200\n"); s.run_until([&] { return s.theta >= 150; }, 60000);
+    s.send("AZ160\n");
+    int p0 = s.pwm; uint32_t t0 = s.ms(); s.run_until([&] { return s.pwm <= p0 - 40; }, 20000);
+    double rate = 40.0 / ((s.ms() - t0) / 1000.0);
+    settle(s);
+    printf("  ramp_down %d: PWM -40 at %.0f PWM/s (register %.0f), end true %.2f, violations %d\n", rd, rate, 255000.0 / rd, s.theta, s.violations);
+    CHECK(rate <= 1.15 * 255000.0 / rd && s.violations == 0, "slow-down at the register 6 rate (%.0f PWM/s, %d violations: %s)", rate, s.violations, s.last_violation.c_str());
+    CHECK(std::fabs(s.theta - 160.0) <= 0.5, "and still lands on the target (%.2f)", s.theta);
+  }
+  {                                                     // finding 1 caution: a long ramp must not pass the range end
+    Sim s(370.0); s.send("CW6,6000\n");
+    s.send("MR\n"); settle(s);
+    Sim g(100.0); g.send("CW6,6000\n"); g.send("AZ150\n"); settle(g);
+    printf("  ramp_down 6000: MR from 370 ends true %.2f fw %.1f; AZ150 from 100 ends %.2f\n", s.theta, s.fw_pos(), g.theta);
+    CHECK(s.theta <= 390.5 && s.violations == 0, "range end holds with ramp_down 6000 (%.2f, %d violations)", s.theta, s.violations);
+    CHECK(std::fabs(g.theta - 150.0) <= 0.5 && g.violations == 0, "goto lands with ramp_down 6000 (%.2f)", g.theta);
+  }
+  for (double tg : {150.6, 150.7}) {                    // finding 3: no relay click without motion
+    Sim s(150.0);
+    int clicks = 0, maxp = 0; int8_t lr = 0;
+    char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", tg); s.send(b);
+    for (int i = 0; i < 6000; i++) { s.run(1); if (s.relay && !lr) clicks++; lr = s.relay; maxp = std::max(maxp, (int)s.pwm); }
+    printf("  AZ%.1f from 150.0: relay %d x, max PWM %d, end true %.2f\n", tg, clicks, maxp, s.theta);
+    CHECK(clicks == 0 || maxp > 0, "a relay click always comes with motion (relay %d x, PWM %d)", clicks, maxp);
+  }
+  {                                                     // finding 4: a wrong contact level at boot heals at the first edge
+    Sim s(150.3);
+    s.rot.last_level = 1; s.rot.set_raw(1503); s.rot.last_level = 1;   // as if the boot read caught a glitch ("open")
+    s.run(100);
+    s.send("AZ160\n"); settle(s); double e1 = s.fw_pos() - s.theta;
+    s.send("AZ140\n"); settle(s); double e2 = s.fw_pos() - s.theta;
+    printf("  wrong boot level: after AZ160 fw-true %+.2f, after AZ140 %+.2f, resyncs %u\n", e1, e2, s.rot.n_resync);
+    CHECK(std::fabs(e1) <= 0.2 && std::fabs(e2) <= 0.2 && s.rot.n_resync >= 1, "parity heals (%.2f %.2f, %u resyncs)", e1, e2, s.rot.n_resync);
+  }
+  {                                                     // finding 5: an EMI burst of 3.5 ms at full speed
+    Sim s(150.0);
+    s.send("AZ170\n"); s.run_until([&] { return s.theta >= 167.84; }, 60000);
+    s.glitch_force_us = 3500; s.run(20);
+    settle(s);
+    printf("  3.5 ms burst at 167.8: end true %.2f fw %.1f, bursts undone %u\n", s.theta, s.fw_pos(), s.rot.n_burst);
+    CHECK(std::fabs(s.fw_pos() - s.theta) <= 0.2 && std::fabs(s.theta - 170.0) <= 0.4 && s.rot.n_burst == 1,
+          "a burst is undone: fw %.1f true %.2f (%u)", s.fw_pos(), s.theta, s.rot.n_burst);
+  }
+}
+
 int main() {
+  test_fable17();
   test_review15();
   test_v15();
   test_v12();

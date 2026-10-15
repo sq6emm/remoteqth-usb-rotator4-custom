@@ -2,6 +2,7 @@
 // 77 % closed duty per degree, contact chatter and EMI spikes, the 2 kHz sampling interrupt, and checks of the hardware rules the firmware must keep.
 #pragma once
 #include "motor.h"
+#include <deque>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -30,6 +31,7 @@ struct Sim {
   double glitch_per_s = 0.0;           // EMI spikes per second (20 us)
   uint64_t chatter_until = 0, next_flip = 0; bool chatter_flip = false;
   uint64_t glitch_until = 0;
+  uint32_t glitch_force_us = 0;        // one forced burst of this length (test of the burst filter)
   uint8_t obs_level = 1;
   uint64_t next_sample = 0;
   // rule checks
@@ -39,6 +41,7 @@ struct Sim {
   uint64_t hard_cut_until = 0;
   bool dir_mismatch = false;         // an "SA" (explicit STOP) was received just now
   std::string rxline;
+  std::deque<std::pair<uint64_t, int>> pwm_hist;   // (time, PWM) of the last 300 ms, for the ramp-down check
   std::mt19937 rng{12345};
   double rnd() { return std::uniform_real_distribution<double>(0, 1)(rng); }
 
@@ -87,6 +90,7 @@ struct Sim {
     if (us < chatter_until && us >= next_flip) { chatter_flip = !chatter_flip; next_flip = us + 60 + (uint64_t)(rnd() * 240); }
     if (us >= chatter_until) chatter_flip = false;
     if (glitch_per_s > 0 && rnd() < glitch_per_s * dt_us / 1e6) glitch_until = us + 20;
+    if (glitch_force_us) { glitch_until = us + glitch_force_us; glitch_force_us = 0; }
     uint8_t lvl = now_base ^ (chatter_flip ? 1 : 0) ^ (us < glitch_until ? 1 : 0);
     obs_level = lvl;
     if (us >= next_sample) { next_sample += 1000000 / PULSE_SAMPLE_HZ; rot.sample(lvl, ms()); }   // Timer1 ISR
@@ -143,11 +147,14 @@ void hw_pwm(uint8_t d) {
     if (d - s.last_pwm > s.max_up_step) s.max_up_step = d - s.last_pwm;
   }
   if (d == 0 && s.last_pwm > 110 && !s.allow_hard_cut && s.us >= s.hard_cut_until) s.violate("hard cut from high PWM (no soft stop)");
-  if (d && d < s.last_pwm) {                         // slowing down: never faster than the soft stop ramp
-    uint64_t dt = s.us - s.last_pwm_us;
-    int allowed = (int)(dt / 1000.0 * 255.0 / s.rot.s.ramp_down) + 2;
-    if (s.last_pwm - d > allowed) s.violate("PWM drop faster than the soft stop ramp");
+  if (d && d < s.last_pwm) {                         // slowing down: never faster than the soft stop ramp, judged over
+    for (auto &h : s.pwm_hist) {                     // the last 300 ms (a per-call slack hid 1-step-per-pass drops)
+      double allowed = (s.us - h.first) / 1000.0 * 255.0 / s.rot.s.ramp_down + 3;
+      if (h.second - d > allowed) { s.violate("PWM drop faster than the soft stop ramp"); break; }
+    }
   }
+  while (!s.pwm_hist.empty() && s.us - s.pwm_hist.front().first > 300000) s.pwm_hist.pop_front();
+  if (d) s.pwm_hist.push_back({s.us, d}); else s.pwm_hist.clear();
   if (d && !s.relay) s.violate("PWM without a relay");
   s.pwm = d; s.last_pwm = d; s.last_pwm_us = s.us;
 }
