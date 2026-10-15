@@ -252,9 +252,10 @@ static void lcd_line(uint8_t row, const char *s) {
 
 static void display() {
   char b[24], *p;
-  int16_t raw = rot.pos();
+  uint32_t now = millis();
+  int16_t raw = rot.pos_live(now);
   p = b; *p++ = 'A'; *p++ = 'z'; *p++ = ' ';
-  int16_t a = rot.az();
+  int16_t a = rot.az_live(now);
   if (a < 1000) *p++ = ' ';
   if (a < 100) *p++ = ' ';
   p = fmt_tenths(p, a); *p++ = '\xDF';

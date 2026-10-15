@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree: the contact is closed for the first 0.79° of each degree and open for the rest. Both edges are counted at their real places, and between edges the position is interpolated from the speed (see *Precision*).
-- **Size:** about 20.3 kB of flash and 1.60 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
+- **Size:** about 20.8 kB of flash and 1.60 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -26,7 +26,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 - **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
-## Precision (1.2 – 1.4)
+## Precision (1.2 – 1.5)
 
 The SPID pulse contact gives two edges per degree, but not half a degree apart: it closes at the start of each degree
 and opens 0.79° later (measured on 2026-10-15: 182 ms closed, 48 ms open at full speed). Up to 1.1 every edge counted
@@ -40,6 +40,10 @@ to 0.79° off, plus the coasting after the cut that no edge saw.
 - **The cut anticipates the coasting.** A landing uses speed estimate × 65 ms (register i), a STOP or soft stop speed ×
   200 ms (register h). Both are fitted to the real event log of 2026-10-15: while slowing down the estimate runs high,
   so the landing factor is smaller. The rotator coasts onto the target instead of past it.
+- **While moving (1.5)** `AZ`, `AR` and the LCD show the interpolated position: driven, the last edge plus speed ×
+  time; coasting, an even slow-down onto the expected rest point. Simulator: mean 0.08° from the truth, at most 0.35°
+  once the speed is known (edge value: mean 0.35°, at most 0.79°). It never steps back against the travel. Control
+  and the EEPROM keep the edge-based value.
 - **At rest** the position is the estimated stopping point, to 0.1°. It is always kept between the two edges the
   rotator is known to be between.
 - **Short moves:** a move too short for a speed reading only starts if it can end closer to the target than staying.
@@ -77,7 +81,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.4`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.5`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |

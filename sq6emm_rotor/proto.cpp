@@ -57,7 +57,7 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
   bool ok;
 
   if (is(t, 'A', 'Z')) {
-    if (!*arg) { put("AZ"); put_tenths(rot.s.report_raw ? rot.pos() : rot.az()); return; }
+    if (!*arg) { put("AZ"); put_tenths(rot.s.report_raw ? rot.pos_live(now) : rot.az_live(now)); return; }
     int16_t v = parse_tenths(arg, &ok);
     if (!ok) return;
     rot.set_speed(0);                             // a goto runs at MaxSpeed (VL/VR speeds are for manual moves)
@@ -101,7 +101,7 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
   if (is(t, 'I', 'P')) { put("IP"); put(diag_inputs ? diag_inputs() : "0"); return; }
   if (is(t, 'A', 'N')) { put("AN"); put(diag_analog ? diag_analog() : "0"); return; }
   // SQ6EMM extensions
-  if (is(t, 'A', 'R')) { put("AR"); put_tenths(rot.pos()); return; }          // raw position (which turn)
+  if (is(t, 'A', 'R')) { put("AR"); put_tenths(rot.pos_live(now)); return; }  // raw position (which turn), live
   if (is(t, 'L', 'G')) {                       // event log: LG = "LG<next seq>@<ms>:", LG<seq> = up to 6 records from seq, "+" = more waiting
     if (!*arg) { uint16_t h; ATOMIC_BEGIN h = rot.log_seq; ATOMIC_END put("LG"); put_u32(h); put("@"); put_u32(now); put(":"); return; }
     uint32_t from = 0; const char *q = arg;

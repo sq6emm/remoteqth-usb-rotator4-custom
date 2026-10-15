@@ -166,7 +166,7 @@ void Rotor::mark_cut(uint32_t now, uint16_t coast_ms) {
   uint32_t le = last_edge(now);
   int8_t d = drive_dir;
   v_cut = d ? speed_tps(now, le) : 0;
-  est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0; coast_cut = coast_ms;
+  est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0; coast_cut = coast_ms; t_cut = now;
 }
 
 int16_t Rotor::duty_permille() const {
@@ -177,6 +177,36 @@ int16_t Rotor::duty_permille() const {
   return (int16_t)(m1 * 1000 / (m1 + m0));
 }
 int16_t Rotor::az() const { int16_t a = pos() % 3600; return a < 0 ? a + 3600 : a; }
+
+int16_t Rotor::in_stretch(int16_t e) const {
+  ATOMIC_BEGIN
+    int16_t lo_e = edge_t(cnt), hi_e = edge_t(cnt + 1);
+    if (e < lo_e) e = lo_e;
+    if (e > hi_e) e = hi_e;
+    if (pt == lo_e && e == hi_e) e = hi_e - 1;    // still inside: the upper edge has not been crossed
+    if (pt == hi_e && e == lo_e) e = lo_e + 1;
+  ATOMIC_END
+  return e;
+}
+
+// What the replies show: driven - the last edge plus speed x time (never past the next edge); coasting after the cut -
+// a uniform slow-down from the cut onto the expected rest point (the same coasting model as the stop decision).
+// Control and saving keep using pos(), the edge-based value.
+int16_t Rotor::pos_live(uint32_t now) const {
+  if (st == S_RUN || st == S_SOFT) {
+    uint32_t le = last_edge(now);
+    return pos_est(mdir, speed_tps(now, le), now, le);
+  }
+  if (est_pending && dir_cut && v_cut) {
+    uint32_t T = 2UL * coast_cut, t = now - t_cut;   // distance v x coast = v x T / 2 when slowing down evenly over T
+    if (t > T) t = T;
+    int32_t x = T ? (int32_t)v_cut * (int32_t)(t - t * t / (2 * T)) / 1000 : 0;
+    return in_stretch(est_cut + dir_cut * (int16_t)x);
+  }
+  return pos();
+}
+
+int16_t Rotor::az_live(uint32_t now) const { int16_t a = pos_live(now) % 3600; return a < 0 ? a + 3600 : a; }
 
 uint8_t Rotor::status() const {
   uint8_t r = 0;
@@ -360,15 +390,8 @@ void Rotor::tick(uint32_t now) {
     }
     if (est_pending && (now - t_idle) >= COAST_MIN_MS && (now - le) >= QUIET_MS) {   // at rest: where between the edges
       est_pending = false;
-      int16_t e = est_cut + dir_cut * (int16_t)((int32_t)v_cut * coast_cut / 1000);
-      ATOMIC_BEGIN
-        int16_t lo_e = edge_t(cnt), hi_e = edge_t(cnt + 1);
-        if (e < lo_e) e = lo_e;
-        if (e > hi_e) e = hi_e;
-        if (pt == lo_e && e == hi_e) e = hi_e - 1;  // still inside: the upper edge has not been crossed
-        if (pt == hi_e && e == lo_e) e = lo_e + 1;
-        pt = e;
-      ATOMIC_END
+      int16_t e = in_stretch(est_cut + dir_cut * (int16_t)((int32_t)v_cut * coast_cut / 1000));
+      ATOMIC_BEGIN pt = e; ATOMIC_END
     }
     if (brake_on && (now - t_idle) >= BRAKE_HOLD_MS) { hw_brake(false); brake_on = false; }
     // one correction move after an overshoot (register a), once the coasting is over

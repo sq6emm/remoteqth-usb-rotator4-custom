@@ -414,7 +414,37 @@ static void test_v12() {
   }
 }
 
+static void test_v15() {
+  printf("1.5: AR / AZ while moving and coasting follow the true position (interpolated), edge value for comparison\n");
+  Sim s(100.0);
+  double max_live = 0, max_edge = 0, sum_live = 0, sum_edge = 0, back = 0; int n = 0;
+  for (double tgt : {160.0, 105.0, 107.0, 140.3, 139.1}) {
+    char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", tgt); s.send(b);
+    double last = -1e9; int dirn = tgt > s.theta ? 1 : -1;
+    for (int i = 0; i < 1200; i++) {
+      s.run(100);
+      std::string r = s.send("AR\n");
+      double live = atof(r.c_str() + 2), edge = s.rot.pos() / 10.0;
+      bool speed_known = s.rot.run_edges >= 2 || !s.rot.driving();
+      if ((s.rot.moving() || s.omega != 0) && speed_known) {
+        max_live = std::max(max_live, std::fabs(live - s.theta)); max_edge = std::max(max_edge, std::fabs(edge - s.theta));
+        sum_live += std::fabs(live - s.theta); sum_edge += std::fabs(edge - s.theta); n++;
+      }
+      if ((s.rot.moving() || s.omega != 0) && last > -1e8) back = std::max(back, (last - live) * dirn);
+      last = live;
+      if (!s.rot.moving() && s.omega == 0 && i > 30) break;
+    }
+    s.run(2500);
+  }
+  printf("  %d samples while moving (speed known): |AR - true| mean %.2f max %.2f (edge only: mean %.2f max %.2f), largest step back %.2f\n",
+         n, sum_live / n, max_live, sum_edge / n, max_edge, back);
+  CHECK(sum_live / n <= 0.5 * sum_edge / n && max_live <= 0.4, "live position follows the truth (mean %.2f max %.2f)", sum_live / n, max_live);
+  CHECK(back <= 0.15, "live position never jumps back against the travel by more than 0.15 (%.2f)", back);
+  CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
+}
+
 int main() {
+  test_v15();
   test_v12();
   test_v11();
   test_protocol();

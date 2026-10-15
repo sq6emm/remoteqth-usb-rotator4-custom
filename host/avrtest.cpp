@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.4", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.5", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -292,10 +292,24 @@ int main(int argc, char **argv) {
   b.run_until([&] { return b.idle(); }, 60000); b.run_ms(1500);
   CHECK(std::fabs(b.fw_az() - 200.0) <= 0.5 && std::fabs(b.theta - 200.0) < 1.0, "move with an LG poll ends on target: fw %.1f true %.2f", b.fw_az(), b.theta);
 
+  printf("== AR while moving follows the true position (1.5: interpolated between edges)\n");
+  {
+    b.cmd("AZ215"); b.run_ms(2500);                     // speed known after the first edges
+    double mx = 0, sum = 0; int n = 0;
+    while (!b.idle() && n < 60) {
+      b.run_ms(150);
+      std::string r = b.cmd("AR");
+      double e = std::fabs(atof(r.c_str() + 2) - b.theta);
+      mx = std::max(mx, e); sum += e; n++;
+    }
+    b.run_until([&] { return b.idle(); }, 30000); b.run_ms(1500);
+    CHECK(n >= 8 && sum / n <= 0.2 && mx <= 0.4, "%d AR samples while moving: |AR - true| mean %.2f max %.2f", n, sum / n, mx);
+  }
+
   printf("== reset (DTR / watchdog / brown-out) during a move\n");
   b.cmd("AZ230"); b.run_ms(4000);
   int fl2 = -1; int during = b.ring_newest(&fl2);
-  CHECK(fl2 == 3 && std::abs(during - 2000) <= 3, "MOVING slot written at the start: %d tenths, flags %d (moving + tenths)", during, fl2);
+  CHECK(fl2 == 3 && std::abs(during - 2150) <= 3, "MOVING slot written at the start: %d tenths, flags %d (moving + tenths)", during, fl2);
   double true_at_reset = b.theta;
   avr_reset(b.avr);
   b.reapply_inputs();                                // simavr clears the external pin levels on reset

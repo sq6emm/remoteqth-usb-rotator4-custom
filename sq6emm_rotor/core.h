@@ -89,6 +89,8 @@ public:
   int16_t edge_t(int16_t c) const;                   // tenths of the edge at the start of stretch c
   int16_t duty_permille() const;                     // measured closed share of a degree (-1: no data yet)
   int16_t az() const;                                // 0..3599
+  int16_t pos_live(uint32_t now) const;              // for the replies / LCD: interpolated while moving and coasting
+  int16_t az_live(uint32_t now) const;               // the same, 0..3599
   int16_t target() const { return tgt; }
   int8_t  dir() const { return mdir; }
   bool    moving() const { return st != S_IDLE || want; }   // includes a move waiting for the coasting to end
@@ -140,6 +142,8 @@ private:
   int16_t pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const;   // last edge + travel since (before the next)
   void mark_cut(uint32_t now, uint16_t coast_ms);   // motor current off: where, how fast, how it will coast
   int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false; uint16_t coast_cut = 0;
+  uint32_t t_cut = 0;
+  int16_t in_stretch(int16_t e) const;   // clamp an estimate into the stretch the rotator is known to be in
   uint32_t rej_window_ms = 0; uint16_t rej_in_window = 0;
 
   int16_t lo() const { return s.az_min; }
