@@ -63,10 +63,17 @@ class SerialLink:
 
 
 def parse(line):
-    """LG<first>@<now>:t,c,p,k;... -> first, now, [(t, c, p, k)]"""
+    """LG<first>@<now>:t,c,p,k;... -> first, now, [(t, c, p, k)]
+    Only records closed by ';' count: rotctld cuts raw 'w' replies at 127 characters, so the tail of a long reply
+    can be a truncated record (one digit short). The next query starts again at the first record not taken."""
     head, _, body = line.partition(":")
     first, _, now = head[2:].partition("@")
-    recs = [tuple(int(x) for x in r.split(",")) for r in body.split(";") if r]
+    recs = []
+    for r in body.split(";")[:-1]:
+        f = r.split(",")
+        if len(f) != 4 or not all(x.lstrip("-").isdigit() for x in f):
+            break
+        recs.append(tuple(int(x) for x in f))
     return int(first), int(now), recs
 
 
@@ -100,7 +107,7 @@ def collect(args):
                     print(f"{rr['t_ms'] / 1000:10.3f} {rr['type']:7} {rr['dir']:3} pos {rr['pos_deg']} target {rr['target_deg']} pwm {rr['pwm']}")
             out.flush()
             nxt = (first + len(recs)) & 0xFFFF
-            if len(recs) < 6:
+            if len(recs) < 5:                         # a full (or rotctld-truncated) reply: more are waiting
                 time.sleep(args.interval)
             if time.time() - t_q > 10:
                 print(f"   ({q / (time.time() - t_q):.1f} queries/s, {n} events, {lost} lost)", file=sys.stderr)
