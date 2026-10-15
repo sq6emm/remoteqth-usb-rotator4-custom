@@ -15,3 +15,7 @@ digit (rotctld limits raw replies to 127 chars) - edges near the end of the file
 
 All gotos landed exactly on target with no coasting. STOP at full speed: 0.5–1° of coasting. Run → first pulse 0.5–1.0 s.
 Through rotctld with the collector running, one query took ~0.6 s; S itself reached the controller without delay.
+
+## Firmware 1.1 speed check
+
+`speedtest11.py`: `M 16 31` (VR3000 = 3.0°/s requested) ran at **2.95°/s** (PWM 128, n=34, 2.85–3.13); the goto 5° ahead landed exactly on 362.0.

@@ -1,0 +1,11 @@
+   450.172 cmd         pos  target 390.0 pwm 0
+   450.172 start   cw  pos 342.0 target  pwm 0
+   450.202 run     cw  pos 342.0 target  pwm 0
+   (1.8 queries/s, 71 events, 0 lost)
+   457.320 cmd     cw  pos  target 362.0 pwm 128
+   457.321 slow    cw  pos 361.0 target  pwm 128
+   457.696 cut     cw  pos 362.0 target  pwm 0
+   457.726 idle        pos 362.0 target  pwm 0
+   (2.3 queries/s, 95 events, 0 lost)
+   (2.5 queries/s, 95 events, 0 lost)
+95 events written to speedtest11.csv, 0 lost
