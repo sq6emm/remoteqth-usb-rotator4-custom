@@ -19,3 +19,12 @@ Through rotctld with the collector running, one query took ~0.6 s; S itself reac
 ## Firmware 1.1 speed check
 
 `speedtest11.py`: `M 16 31` (VR3000 = 3.0°/s requested) ran at **2.95°/s** (PWM 128, n=34, 2.85–3.13); the goto 5° ahead landed exactly on 362.0.
+
+## Range ends (firmware 1.1)
+
+`limits11.py`, all 8 checks passed:
+- At both ends, the controller refused `AZ395` / `AZ-35` (GE 32), and rotctld refused `P 395` / `P -35` (RPRT -21). Nothing moved.
+- A full-speed manual run (`M 16 100` / `M 8 100`) from 5° before the end slowed down at once (PWM ~120). It cut at PWM 77 exactly at 390.0 / -30.0, with no coasting past the end.
+- A second manual push at the end was logged as a command, but the motor did not start.
+
+The final `P 342` from -30 went the short way to raw -18 (heading 342): correct, but it ended on the overlap turn.

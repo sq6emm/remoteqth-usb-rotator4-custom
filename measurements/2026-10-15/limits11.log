@@ -1,0 +1,21 @@
+   1.24 start 385.0 VESQ6EMM-rotor-1.1 GE GE32
+   1.51 P 385 RPRT 0
+   6.08 near the end: 385.0
+  10.31 PASS controller refuses AZ395 pos 385.0 -> 385.0, GE 32
+  13.41 PASS rotctld refuses 'P 395 0' RPRT -21, pos 385.0
+  13.68 M 16 100 (full speed into the end) RPRT 0
+  20.80 PASS full-speed manual run stops at 390 rest 390.0, furthest seen 390.0, PD PDa176,r0,c0,h0,s0,t0,p0,f490
+  21.07 M 16 50 again at the end RPRT 0
+  25.28 PASS second push at the end does not move pos 390.0 -> 390.0
+  25.55 P -25 RPRT 0
+ 126.81 near the end: -25.0
+ 131.39 PASS controller refuses AZ-35 pos -25.0 -> -25.0, GE 32
+ 134.49 PASS rotctld refuses 'P -35 0' RPRT -21, pos -25.0
+ 134.76 M 8 100 (full speed into the end) RPRT 0
+ 141.95 PASS full-speed manual run stops at -30 rest -30.0, furthest seen -30.0, PD PDa1016,r0,c0,h0,s0,t0,p0,f490
+ 142.22 M 8 50 again at the end RPRT 0
+ 146.43 PASS second push at the end does not move pos -30.0 -> -30.0
+ 146.70 back: P 342 RPRT 0
+ 153.83 back at -18.0 GE GE0
+
+SUMMARY: controller refuses AZ395: PASS, rotctld refuses 'P 395 0': PASS, full-speed manual run stops at 390: PASS, second push at the end does not move: PASS, controller refuses AZ-35: PASS, rotctld refuses 'P -35 0': PASS, full-speed manual run stops at -30: PASS, second push at the end does not move: PASS
