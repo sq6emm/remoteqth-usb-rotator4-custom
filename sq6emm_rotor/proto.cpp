@@ -70,15 +70,12 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
   if (is(t, 'S', 'E')) return;
   if (is(t, 'M', 'L')) { rot.manual(-1); return; }
   if (is(t, 'M', 'R')) { rot.manual(1); return; }
-  if (is(t, 'V', 'L') || is(t, 'V', 'R')) {     // velocity in mdeg/s (Hamlib: (speed 1..100 - 1) * 100)
+  if (is(t, 'V', 'L') || is(t, 'V', 'R')) {     // velocity in mdeg/s (Hamlib: (speed 1..100 - 1) * 100), e.g. VL3000 = 3 deg/s
     uint32_t v = 0; const char *q = arg;
     if (!*q) return;
     while (*q >= '0' && *q <= '9' && v < 100000UL) v = v * 10 + (*q++ - '0');
     if (*q) return;
-    if (v > 9900) v = 9900;                       // 0 = the slowest speed (Hamlib speed 1), stop is SA
-    uint8_t f = rot.s.pwm_floor, m = rot.s.pwm_max;
-    uint8_t sp = f + (uint8_t)((uint32_t)(m - f) * (uint32_t)v / 9900UL);
-    rot.set_speed(sp ? sp : 1);
+    rot.set_speed(rot.pwm_for_speed(v));          // real speed from the measured curve; 0 = slowest, stop is SA
     rot.manual(t[1] == 'R' ? 1 : -1);
     return;
   }
@@ -105,7 +102,7 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
   if (is(t, 'A', 'N')) { put("AN"); put(diag_analog ? diag_analog() : "0"); return; }
   // SQ6EMM extensions
   if (is(t, 'A', 'R')) { put("AR"); put_tenths(rot.pos()); return; }          // raw position (which turn)
-  if (is(t, 'L', 'G')) {                       // event log: LG = "LG<next seq>@<ms>:", LG<seq> = up to 6 records from seq
+  if (is(t, 'L', 'G')) {                       // event log: LG = "LG<next seq>@<ms>:", LG<seq> = up to 6 records from seq, "+" = more waiting
     if (!*arg) { uint16_t h; ATOMIC_BEGIN h = rot.log_seq; ATOMIC_END put("LG"); put_u32(h); put("@"); put_u32(now); put(":"); return; }
     uint32_t from = 0; const char *q = arg;
     while (*q >= '0' && *q <= '9') from = from * 10 + (*q++ - '0');
@@ -113,10 +110,17 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
     LogRec r[6]; uint16_t first;
     uint8_t n = rot.log_read((uint16_t)from, r, 6, &first);
     put("LG"); put_u32(first); put("@"); put_u32(now); put(":");
-    for (uint8_t i = 0; i < n; i++) {
-      char b[8];
-      put_u32(r[i].t); put(","); fmt_i16(b, r[i].c); put(b); put(","); put_u32(r[i].p); put(","); put_u32(r[i].k); put(";");
+    uint8_t i = 0;
+    for (; i < n; i++) {                        // whole records only, the reply stays within LG_REPLY_MAX
+      char b[32], *e = fmt_u32(b, r[i].t);
+      *e++ = ','; fmt_i16(e, r[i].c); e += strlen(e);
+      *e++ = ','; e = fmt_u32(e, r[i].p);
+      *e++ = ','; e = fmt_u32(e, r[i].k);
+      *e++ = ';'; *e = 0;
+      if (rlen + (e - b) + 1 + 2 > LG_REPLY_MAX) break;   // + "+" + "\r\n"
+      put(b);
     }
+    if (i < n || n == 6) put("+");             // more records may be waiting: read again right away
     return;
   }
   if (is(t, 'P', 'D')) {                                                       // pulse / motion diagnostics

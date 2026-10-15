@@ -245,10 +245,12 @@ static void test_endurance() {
 
 // read the whole event log through the protocol, like the PC tool does
 struct Ev { uint16_t seq; uint32_t t; int c, p, k; };
+static size_t g_lg_longest = 0;                     // longest LG reply seen (rotctld limit)
 static std::vector<Ev> read_log(Sim &s, uint16_t &next, int *lost = nullptr) {
   std::vector<Ev> v;
   for (int guard = 0; guard < 100; guard++) {
     std::string r = s.send("LG" + std::to_string(next) + "\n");
+    g_lg_longest = std::max(g_lg_longest, r.size());
     unsigned first; unsigned long now; int off = 0;
     if (sscanf(r.c_str(), "LG%u@%lu:%n", &first, &now, &off) < 2 || !off) break;
     if (lost && first != next) *lost += (uint16_t)(first - next);
@@ -342,7 +344,42 @@ static void test_review() {
   }
 }
 
+static void test_v11() {
+  printf("1.1: VL/VR in real deg/s (measured speed curve), LG replies within the rotctld limit\n");
+  {
+    Sim s(50.0);
+    struct { uint32_t v; int pwm; } t[] = {{0, 96}, {2000, 96}, {2400, 104}, {3200, 144}, {3600, 176}, {4000, 214}, {4400, 253}, {9900, 253}};
+    for (auto &x : t) CHECK(s.rot.pwm_for_speed(x.v) == x.pwm, "VL%u -> PWM %d (want %d)", x.v, s.rot.pwm_for_speed(x.v), x.pwm);
+    s.send("CW0,150\n"); CHECK(s.rot.pwm_for_speed(4000) == 150, "MaxSpeed caps the curve: %d", s.rot.pwm_for_speed(4000));
+    s.send("CW1,110\n"); CHECK(s.rot.pwm_for_speed(0) == 110, "the floor lifts the slowest speed: %d", s.rot.pwm_for_speed(0));
+  }
+  for (uint32_t v : {2000u, 3000u, 4000u}) {               // sim motor = the measured curve (motor.h)
+    Sim s(20.0);
+    s.send("VR" + std::to_string(v) + "\n"); s.run(6000);
+    double p0 = s.theta; s.run(10000);
+    double sp = (s.theta - p0) / 10.0;
+    printf("  VR%u: %.2f deg/s at PWM %d\n", v, sp, s.pwm);
+    CHECK(std::fabs(sp - v / 1000.0) < 0.1 * v / 1000.0, "VR%u runs at %.2f deg/s", v, sp);
+    s.allow_hard_cut = true; s.send("SA\n"); settle(s);
+    CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
+  }
+  {
+    Sim s(-30.0);
+    s.us += 3600ull * 1000000;                           // 1 h uptime: 7-digit timestamps, as on the real controller
+    uint16_t next = 0; int lost = 0; size_t n = 0;
+    g_lg_longest = 0;
+    s.send("AZ390.0\n");
+    for (int i = 0; i < 200 && (s.rot.moving() || i < 3); i++) { s.run(1000); n += read_log(s, next, &lost).size(); }
+    s.send("AZ-30.0\n");
+    for (int i = 0; i < 200 && (s.rot.moving() || i < 3); i++) { s.run(1000); n += read_log(s, next, &lost).size(); }
+    printf("  2 x 420 deg: %zu events read, seq %u, lost %d, longest LG reply %zu chars\n", n, s.rot.log_seq, lost, g_lg_longest);
+    CHECK(s.rot.log_seq > 1000 && lost == 0 && n == s.rot.log_seq, "all events read (%zu of %u, lost %d)", n, s.rot.log_seq, lost);
+    CHECK(g_lg_longest <= LG_REPLY_MAX && g_lg_longest < 127, "LG replies stay within rotctld's 127 chars: %zu", g_lg_longest);
+  }
+}
+
 int main() {
+  test_v11();
   test_protocol();
   test_log();
   test_goto_basic();

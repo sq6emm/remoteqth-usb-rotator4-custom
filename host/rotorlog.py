@@ -94,7 +94,8 @@ def collect(args):
     t_end = time.time() + args.duration if args.duration else None
     try:
         while t_end is None or time.time() < t_end:
-            first, now, recs = parse(link.query(f"LG{nxt}"))
+            line = link.query(f"LG{nxt}")
+            first, now, recs = parse(line)
             q += 1
             if first != nxt:
                 gap = (first - nxt) & 0xFFFF
@@ -107,7 +108,7 @@ def collect(args):
                     print(f"{rr['t_ms'] / 1000:10.3f} {rr['type']:7} {rr['dir']:3} pos {rr['pos_deg']} target {rr['target_deg']} pwm {rr['pwm']}")
             out.flush()
             nxt = (first + len(recs)) & 0xFFFF
-            if len(recs) < 5:                         # a full (or rotctld-truncated) reply: more are waiting
+            if not line.endswith("+") and len(recs) < 5:   # 1.1 marks "more waiting" with '+'; 1.0: a full reply
                 time.sleep(args.interval)
             if time.time() - t_q > 10:
                 print(f"   ({q / (time.time() - t_q):.1f} queries/s, {n} events, {lost} lost)", file=sys.stderr)

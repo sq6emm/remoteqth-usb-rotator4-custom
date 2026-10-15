@@ -1,6 +1,7 @@
 // Host simulation of the controller hardware + SPID RAU: motor with inertia and stiction, reed contact with
 // 77 % closed duty per degree, contact chatter and EMI spikes, the 2 kHz sampling interrupt, and checks of the hardware rules the firmware must keep.
 #pragma once
+#include "motor.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -22,7 +23,7 @@ struct Sim {
   double theta = 0, omega = 0;        // true antenna azimuth (deg, continuous) and speed (deg/s)
   int8_t relay = 0; uint8_t pwm = 0; bool brake = false; uint16_t hz = 490;
   bool jam = false;
-  double vmax = 4.6, u0 = 0.20, u_start = 0.24, tau = 0.30, tau_coast = 0.08;
+  double u_start = 0.24, tau = 0.30, tau_coast = 0.08;   // speed per PWM: motor.h (measured)
   // contact
   double duty = 0.77;
   double chatter_prob = 0.0;           // probability of chatter after a real edge
@@ -65,7 +66,7 @@ struct Sim {
     if (jam) { omega = 0; return; }
     if (relay && pwm) {
       if (std::fabs(omega) < 0.02 && u < u_start) { omega = 0; return; }   // stiction
-      double target = relay * vmax * std::max(0.0, (u - u0) / (1 - u0));
+      double target = relay * motor_speed(pwm);
       omega += (target - omega) * dt / tau;
     } else {
       omega -= omega * dt / tau_coast;

@@ -192,6 +192,22 @@ int16_t Rotor::dist_to_limit() const {
   return mdir > 0 ? hi() - p : p - lo();
 }
 
+uint8_t Rotor::pwm_for_speed(uint32_t v) const {
+  static const uint8_t P[SPEED_N] = SPEED_PWM;
+  static const uint16_t V[SPEED_N] = SPEED_MDEG;
+  uint16_t p;
+  if (v <= V[0]) p = P[0];
+  else if (v >= V[SPEED_N - 1]) p = 255;
+  else {
+    uint8_t i = 1;
+    while (v > V[i]) i++;
+    p = P[i - 1] + (uint16_t)((uint32_t)(P[i] - P[i - 1]) * (v - V[i - 1]) / (V[i] - V[i - 1]));
+  }
+  if (p > s.pwm_max) p = s.pwm_max;
+  if (p < s.pwm_floor) p = s.pwm_floor;
+  return p ? p : 1;
+}
+
 uint8_t Rotor::cap() const {
   return (speed && speed < s.pwm_max) ? speed : s.pwm_max;
 }

@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree. Both edges are counted, so the resolution is 0.5°.
-- **Size:** about 17.4 kB of flash and 1.55 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 350 bytes to spare (measured in simavr).
+- **Size:** about 17.6 kB of flash and 1.56 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 320 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -37,19 +37,19 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `EL`, `EL<x>` | Returns `EL0.0`; setting it is ignored (azimuth-only rotator). |
 | `SA` (`SE`) | STOP: immediate. `SE` is ignored. |
 | `ML`, `MR` | Run CCW / CW to the range end, until a stop command. |
-| `VL<v>`, `VR<v>` | Run CCW / CW at v mdeg/s, 0–9900, mapped onto the floor…MaxSpeed PWM. `0` is the slowest speed (Hamlib speed 1). This is what Hamlib `M 8/16 <speed>` sends; it is stopped with `SA` (Hamlib `S`). |
+| `VL<v>`, `VR<v>` | Run CCW / CW at v mdeg/s (0–9900), in real speed: the measured speed curve (below) picks the PWM. The motor runs at about 2.0–4.4°/s, so slower requests run at ~2°/s and faster ones at full speed. `0` is the slowest speed (Hamlib speed 1). This is what Hamlib `M 8/16 <speed>` sends (`VL`/`VR` = (speed − 1) × 100, so speed 21–45 is the useful range); it is stopped with `SA` (Hamlib `S`). |
 | `GS` | Status: 1 idle, 2 moving, 4 pointing (idle on target), 8 error. |
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.0`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.1`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
 | `PARK` | Go to the park position (register f). |
 | `AR` | SQ6EMM extension: raw position, for example `AR375.5` (which turn). |
 | `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>`. |
-| `LG`, `LG<seq>` | SQ6EMM extension: event log. `LG` gives `LG<next seq>@<ms>:`. `LG<seq>` returns up to 6 records from seq: `LG<first>@<ms>:t,c,p,k;…` (see below). |
+| `LG`, `LG<seq>` | SQ6EMM extension: event log. `LG` gives `LG<next seq>@<ms>:`. `LG<seq>` returns up to 6 records from seq: `LG<first>@<ms>:t,c,p,k;…` (see below), only whole records and never more than 118 characters, because rotctld cuts raw replies at 127. A `+` at the end means more records may be waiting. |
 
 ### Registers
 
@@ -124,6 +124,10 @@ Without the `-C` option Hamlib allows only 0–360. Headings still go the short 
 | speeds | `CW0,<pwm>` |
 | `\?PD` | `PD` |
 
+### Speed curve
+
+`VL`/`VR` speeds go through a table of steady speed per PWM, measured on the real rotator at 490 Hz on 2026-10-15 (`measurements/2026-10-15`): PWM 96 → 2.0°/s, 112 → 2.8°/s, 176 → 3.6°/s, 253 → 4.4°/s, linear in between (`SPEED_PWM` / `SPEED_MDEG` in `config.h`). MaxSpeed (register 0) and the floor (register 1) still limit the result. Re-measure with `host/rotorlog.py` after changing the PWM frequency or the mechanics. The simulators use the same measured curve (`host/motor.h`).
+
 ## Build and test (Docker)
 
 ```
@@ -149,12 +153,12 @@ The AVR-level test (`host/avrtest.cpp`) covers what the host simulator cannot:
 - the LCD contents (HD44780 model);
 - EEPROM: takeover from a K3NG image, the position block and the K3NG mirror;
 - the watchdog being enabled;
-- stack depth: at least 350 bytes never used;
+- stack depth: at least 320 bytes never used;
 - a reset during a move (`GE64`, nothing moves by itself);
 - a torn position write (the previous slot is used);
 - a settings image with a valid CRC but impossible values (defaults);
 - buttons held at power-up;
-- a long `LG` reply during a move (non-blocking serial output).
+- a long `LG` reply during a move (non-blocking serial output, at most 118 characters).
 
 Both simulators check the hardware rules:
 - no relay switching under current;

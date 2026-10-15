@@ -3,7 +3,7 @@
 // motor-side reed pulses (1 pulse per degree, both edges counted = 0.5 deg).
 #pragma once
 
-#define FW_VERSION "SQ6EMM-rotor-1.0"
+#define FW_VERSION "SQ6EMM-rotor-1.1"
 
 // ---- pins (RemoteQTH 4.0.3, see docs/Rotator-Interface-4.0.3.pdf) ----
 #define PIN_PULSE      2    // PD2, PULSE-CCW line from the rotator (10k pull-up, 1k/100n/1k + BAV99); contact closed = low
@@ -48,6 +48,15 @@
 #define POS_MARGIN_T        150   // the counter keeps counting 15 deg beyond the range (never loses pulses)
 #define LOG_N                64   // event log entries (8 bytes each), read with LG<seq>
 #define LOG_SAMPLE_MS       100   // while the motor is driven: a PWM/position sample if nothing else was logged
+#define LG_REPLY_MAX        118   // LG reply length limit incl. "\r\n": rotctld cuts raw 'w' replies at 127 chars
+
+// ---- speed curve: VL/VR (Hamlib M <dir> <speed>) ask for mdeg/s; this maps it onto PWM ----
+// Steady speed per PWM measured on the real rotator at 490 Hz, 2026-10-15 (measurements/2026-10-15).
+// Slower requests run at the first point (lower PWM was not measured and can stall), faster ones at MaxSpeed.
+// Re-measure after changing the PWM frequency (register 2) or the mechanics.
+#define SPEED_N             4
+#define SPEED_PWM         { 96,  112,  176,  253}
+#define SPEED_MDEG        {2000, 2800, 3600, 4400}
 
 // ---- encoder (preset knob) ----
 #define ENC_LOW          300      // ADC hysteresis thresholds (external AREF from the board divider)

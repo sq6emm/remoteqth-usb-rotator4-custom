@@ -2,6 +2,7 @@
 // A motor model is wired to the real pins: reed pulses into PD2, PWM measured on PB3 (OC2A), relays on PB0/PB1,
 // brake on PB2, buttons on PC3..PC5, encoder voltages on ADC6/ADC2, HD44780 LCD on PD4..PD7/PB4/PB5, UART for
 // Easycomm III. Checks what the host simulator cannot: register setup, interrupts, timing, stack, EEPROM, LCD.
+#include "motor.h"
 #include <simavr/sim_avr.h>
 #include <simavr/sim_elf.h>
 #include <simavr/avr_ioport.h>
@@ -150,7 +151,7 @@ struct Bench {
     int rel = relay_cw ? 1 : (relay_ccw ? -1 : 0);
     if (rel && duty > 0.01) {
       if (std::fabs(omega) < 0.02 && duty < 0.24) omega = 0;
-      else { double tgt = rel * 4.6 * std::max(0.0, (duty - 0.20) / 0.80); omega += (tgt - omega) * dt / 0.30; }
+      else { double tgt = rel * motor_speed((uint8_t)(duty * 255 + 0.5)); omega += (tgt - omega) * dt / 0.30; }
     } else {
       omega -= omega * dt / 0.08; if (std::fabs(omega) < 0.01) omega = 0;
     }
@@ -225,7 +226,7 @@ int main() {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.0", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.1", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -272,7 +273,8 @@ int main() {
   b.cmd("AZ200"); b.run_ms(3000);
   double lg_lat; std::string lg = b.cmd("LG0", &lg_lat);
   int recs = 0; for (char c : lg) recs += c == ';';
-  CHECK(lg.rfind("LG", 0) == 0 && recs == 6, "LG0 during a move: %d records, %zu chars, complete %.0f ms after the command", recs, lg.size(), lg_lat);
+  CHECK(lg.rfind("LG", 0) == 0 && recs >= 3 && lg.size() + 2 <= 118 && lg.back() == '+',
+        "LG0 during a move: %d records + '+', %zu chars + CR LF (<= 118 = LG_REPLY_MAX), complete %.0f ms after the command", recs, lg.size(), lg_lat);
   b.run_until([&] { return b.idle(); }, 60000); b.run_ms(1500);
   CHECK(std::fabs(b.fw_az() - 200.0) <= 0.5 && std::fabs(b.theta - 200.0) < 1.0, "move with an LG poll ends on target: fw %.1f true %.2f", b.fw_az(), b.theta);
 

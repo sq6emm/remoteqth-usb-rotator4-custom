@@ -90,6 +90,7 @@ public:
   void soft_stop();              // ramp down (all normal stops)
   void stop_now();               // explicit STOP: motor current off immediately
   void set_speed(uint8_t pwm) { speed = pwm; }   // VL/VR velocity cap (0 = s.pwm_max)
+  uint8_t pwm_for_speed(uint32_t mdeg) const;   // VL/VR mdeg/s -> PWM (measured curve, within floor..MaxSpeed)
   void set_position(int16_t t);  // calibration: 0..3599 keeps the current turn, other values are raw
   void clear_errors() { errors &= (ER_NOPOS | ER_UNCERT); }   // position errors only go away with CW7
 
