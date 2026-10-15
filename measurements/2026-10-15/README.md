@@ -28,3 +28,13 @@ Through rotctld with the collector running, one query took ~0.6 s; S itself reac
 - A second manual push at the end was logged as a command, but the motor did not start.
 
 The final `P 342` from -30 went the short way to raw -18 (heading 342): correct, but it ended on the overlap turn.
+
+### Run 2 (`limits11b.py`): the full test in one clean run, 11/11 passed
+
+CCW end first (from raw -18), then CW, then back to raw 342, unwound. The results are the same as run 1:
+- Both ends: targets beyond were refused by the controller (GE 32) and by rotctld (RPRT -21).
+- Full-speed manual runs slowed down from PWM ~120 and cut at PWM 77 exactly at -30.0 / 390.0.
+- A second push did not move the motor.
+- The gotos to -25 and 385 landed exactly. -30 to 385 (415 deg) took 93 s.
+
+The collector lost 420 of about 1500 events, all during the long full-speed moves. Three clients shared rotctld at 9600 baud (test script, collector, hamcam), and pulses plus samples come at about 20/s. Every state event at both ends was recorded.
