@@ -23,9 +23,9 @@ struct Sim {
   double theta = 0, omega = 0;        // true antenna azimuth (deg, continuous) and speed (deg/s)
   int8_t relay = 0; uint8_t pwm = 0; bool brake = false; uint16_t hz = 490;
   bool jam = false;
-  double u_start = 0.24, tau = 0.30, tau_coast = 0.08;   // speed per PWM: motor.h (measured)
+  double u_start = 0.24, tau = 0.30, tau_coast = 0.18;   // coasting: measured from the real STOP log   // speed per PWM: motor.h (measured)
   // contact
-  double duty = 0.77;
+  double duty = 0.79;                  // measured 2026-10-15: 182 ms closed / 48 ms open at full speed
   double chatter_prob = 0.0;           // probability of chatter after a real edge
   double glitch_per_s = 0.0;           // EMI spikes per second (20 us)
   uint64_t chatter_until = 0, next_flip = 0; bool chatter_flip = false;
@@ -51,12 +51,12 @@ struct Sim {
     g_sim = this;
     theta = start_deg;
     rot.defaults();
-    rot.cnt = (int16_t)lround(start_deg * 2);
     obs_level = rot.last_level = base_level();
+    rot.set_raw((int16_t)lround(start_deg * 10));
     rot.begin(ms());
   }
 
-  uint8_t base_level() const {          // contact closed (line low) for the first 77 % of each degree
+  uint8_t base_level() const {          // contact closed (line low) for the first 79 % of each degree
     double f = theta - floor(theta);
     return f < duty ? 0 : 1;
   }
@@ -70,7 +70,7 @@ struct Sim {
       omega += (target - omega) * dt / tau;
     } else {
       omega -= omega * dt / tau_coast;
-      if (std::fabs(omega) < 0.01) omega = 0;
+      if (std::fabs(omega) < 0.3) omega = 0;     // worm gear friction stops the last bit at once
     }
     theta += omega * dt;
   }
@@ -98,7 +98,7 @@ struct Sim {
       for (int k = 0; k < 20; k++) step(50);
       rot.tick(now);
       if (relay && rot.dir() != relay) { if (!dir_mismatch) violate("core direction differs from the energised relay"); dir_mismatch = true; }
-      if (rot.save_due(now, false)) rot.saved(rot.cnt_copy());
+      if (rot.save_due(now, false)) rot.saved(rot.pos());
     }
   }
   template <class F> bool run_until(F cond, uint32_t max_ms) {

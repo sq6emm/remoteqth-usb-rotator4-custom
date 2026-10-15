@@ -85,7 +85,7 @@ struct Bench {
     bool fast = (avr->data[0xB0] & 3) == 3;
     return 16e6 / presc[cs] / (fast ? 256 : 510);
   }
-  uint8_t contact() const { double f = theta - floor(theta); return f < 0.77 ? 0 : 1; }
+  uint8_t contact() const { double f = theta - floor(theta); return f < 0.79 ? 0 : 1; }   // contact closed 0.79 deg of each degree (measured)
 
   void boot(const std::vector<uint8_t> &eeprom, double start_deg) {
     memset(&fw, 0, sizeof fw);
@@ -153,7 +153,7 @@ struct Bench {
       if (std::fabs(omega) < 0.02 && duty < 0.24) omega = 0;
       else { double tgt = rel * motor_speed((uint8_t)(duty * 255 + 0.5)); omega += (tgt - omega) * dt / 0.30; }
     } else {
-      omega -= omega * dt / 0.08; if (std::fabs(omega) < 0.01) omega = 0;
+      omega -= omega * dt / 0.18; if (std::fabs(omega) < 0.3) omega = 0;   // measured coasting, friction stop
     }
     theta += omega * dt;
     set_pd2();
@@ -226,7 +226,7 @@ int main() {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.1", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.2", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -244,10 +244,12 @@ int main() {
   CHECK(b.run_until([&] { return b.idle(); }, 30000), "move finished at %.1f s", b.now_ms() / 1000);
   b.run_ms(1500);
   printf("  true %.2f fw %.1f, LCD '%s' / '%s'\n", b.theta, b.fw_az(), b.lcd_line(0).c_str(), b.lcd_line(1).c_str());
-  CHECK(std::fabs(b.fw_az() - 120.0) <= 0.5 && std::fabs(b.theta - 120.0) < 1.0, "arrived: fw %.1f true %.2f", b.fw_az(), b.theta);
-  CHECK(b.lcd_line(0).find("120.0") != std::string::npos && b.lcd_line(1).find("On target") == 0, "LCD shows the position and 'On target'");
-  int fl = -1; int pos_cnt = b.ring_newest(&fl); float mirror; uint8_t m[4] = {b.ee(9), b.ee(10), b.ee(11), b.ee(12)}; memcpy(&mirror, m, 4);
-  CHECK(pos_cnt == 240 && fl == 0 && mirror == 120.0f, "EEPROM: newest ring slot %d counts (flags %d), K3NG mirror %.1f", pos_cnt, fl, mirror);
+  CHECK(std::fabs(b.theta - 120.0) <= 0.4 && std::fabs(b.fw_az() - b.theta) <= 0.2, "arrived: fw %.1f true %.2f", b.fw_az(), b.theta);
+  char azs[12]; snprintf(azs, sizeof azs, "%.1f", b.fw_az());
+  CHECK(b.lcd_line(0).find(azs) != std::string::npos && b.lcd_line(1).find("On target") == 0, "LCD shows the position %s and 'On target'", azs);
+  int fl = -1; int pos_t = b.ring_newest(&fl); float mirror; uint8_t m[4] = {b.ee(9), b.ee(10), b.ee(11), b.ee(12)}; memcpy(&mirror, m, 4);
+  CHECK(pos_t == (int)lround(b.fw_az() * 10) && fl == 2 && std::fabs(mirror - pos_t / 10.0f) < 0.01f,
+        "EEPROM: newest ring slot %d tenths (flags %d = tenths), K3NG mirror %.1f", pos_t, fl, mirror);
   b.run_ms(2000);
   CHECK(b.brake == 0, "brake engaged again after the hold time");
 
@@ -281,7 +283,7 @@ int main() {
   printf("== reset (DTR / watchdog / brown-out) during a move\n");
   b.cmd("AZ230"); b.run_ms(4000);
   int fl2 = -1; int during = b.ring_newest(&fl2);
-  CHECK(fl2 == 1 && during == 400, "MOVING slot written at the start: %d counts, flags %d", during, fl2);
+  CHECK(fl2 == 3 && std::abs(during - 2000) <= 3, "MOVING slot written at the start: %d tenths, flags %d (moving + tenths)", during, fl2);
   double true_at_reset = b.theta;
   avr_reset(b.avr);
   b.reapply_inputs();                                // simavr clears the external pin levels on reset
@@ -364,6 +366,23 @@ int main() {
     memcpy(&img[131], st, 21); img[131 + 21] = Bench::crc8(st, 21);
     Bench e2; e2.boot(img, 10.0); e2.run_ms(1000);
     CHECK(e2.cmd("CR5") == "CR5,2000", "ramp_up 0 rejected, defaults used: %s", e2.cmd("CR5").c_str());
+  }
+
+  printf("== 1.1 EEPROM (settings version 1, position slot in 0.5 deg counts) taken over\n");
+  {
+    std::vector<uint8_t> img = k3ng_eeprom(10.0f);
+    uint8_t st[21] = {253, 64, 0xEA, 0x01, 0xD4, 0xFE, 0x3C, 0x0F, 0xB8, 0x0B, 0xE8, 0x03, 30, 0, 0, 0, 1, 1, 0, 0, 0};   // ramp_up 3000
+    img[128] = 'S'; img[129] = 'R'; img[130] = 1;
+    memcpy(&img[131], st, 21); img[131 + 21] = Bench::crc8(st, 21);
+    uint8_t sl[5] = {685 & 0xFF, 685 >> 8, 7, 0, 0}; sl[4] = Bench::crc8(sl, 4);   // 685 counts = 342.5 deg
+    memcpy(&img[256], sl, 5);
+    Bench o; o.boot(img, 342.5); o.run_ms(1000);
+    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRg") == "CRg,0.8" && o.cmd("CRh") == "CRh,180" && o.ee(130) == 2,
+          "settings kept (%s), new registers default (%s %s), image now version %d", o.cmd("CR5").c_str(), o.cmd("CRg").c_str(), o.cmd("CRh").c_str(), o.ee(130));
+    CHECK(o.cmd("AR") == "AR342.5" && o.cmd("GE") == "GE0", "old slot 685 counts -> %s %s", o.cmd("AR").c_str(), o.cmd("GE").c_str());
+    o.cmd("AZ346.0");
+    o.run_until([&] { return o.idle(); }, 30000); o.run_ms(1500);
+    CHECK(std::fabs(o.theta - 346.0) <= 0.4 && std::fabs(o.fw_az() - o.theta) <= 0.2, "then a move lands: fw %.1f true %.2f", o.fw_az(), o.theta);
   }
 
   printf("== buttons held at power-up (short / water) never start a move\n");

@@ -3,8 +3,8 @@
 Firmware written from scratch for the SQ6EMM azimuth rotator controller. It speaks **Easycomm III** only (Hamlib `rotctld -m 204`).
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
-- **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree. Both edges are counted, so the resolution is 0.5°.
-- **Size:** about 17.6 kB of flash and 1.56 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 320 bytes to spare (measured in simavr).
+- **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree: the contact is closed for the first 0.79° of each degree and open for the rest. Both edges are counted at their real places, and between edges the position is interpolated from the speed (see *Precision*).
+- **Size:** about 19.9 kB of flash and 1.59 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 310 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -26,6 +26,32 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 - **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
+## Precision (1.2)
+
+The SPID pulse contact gives two edges per degree, but not half a degree apart: it closes at the start of each degree
+and opens 0.79° later (measured on 2026-10-15: 182 ms closed, 48 ms open at full speed). Up to 1.1 every edge counted
+as 0.5°, regardless of direction. Depending on the direction a move arrived from, the reported position could be up
+to 0.79° off, plus the coasting after the cut that no edge saw.
+
+1.2 gets the most out of this contact:
+- **Every edge at its real place.** The closing edge is n.0, the opening edge n + 0.8 (register g). Which edge is
+  reported depends on the side the rotator crossed it from.
+- **Between edges** the position is the last edge plus speed × time. The speed comes from the stretch just crossed.
+- **The cut anticipates the coasting:** coasting = speed × 180 ms (register h, from the STOP log). The rotator coasts
+  onto the target instead of past it.
+- **At rest** the position is the estimated stopping point, to 0.1°. It is always kept between the two edges the
+  rotator is known to be between.
+- **Short moves:** a move too short for a speed reading only starts if it can end closer to the target than staying.
+- **Calibration (`CW7`)** keeps fractions. The edge grid moves by `t − position`, whole degrees in the counter and the
+  rest in a stored offset. Up to 1.1 a calibration snapped to the 0.5° grid.
+
+In the simulator with the measured contact and coasting, over 80 random gotos in both directions:
+- reported vs. true position: within 0.18° (1.1: 0.79°);
+- true position vs. target: mean 0.08°, at most 0.35° (1.1: mean 0.45°, at most 0.82°).
+
+The 0.35° worst case is a deliberate "stay": a move that short could not land closer. The event log still records
+counts (0.5° units): `rotorlog.py` shows them as nominal degrees.
+
 ## Easycomm III
 
 Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib sends `GS\n;`. Queries are answered as `<cmd><value>\r\n`. Set commands get no reply.
@@ -42,13 +68,13 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.1`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.2`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
 | `PARK` | Go to the park position (register f). |
 | `AR` | SQ6EMM extension: raw position, for example `AR375.5` (which turn). |
-| `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>`. |
+| `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>,e<contact closed share, per mille>` (`e-` until enough steady pulses were seen). |
 | `LG`, `LG<seq>` | SQ6EMM extension: event log. `LG` gives `LG<next seq>@<ms>:`. `LG<seq>` returns up to 6 records from seq: `LG<first>@<ms>:t,c,p,k;…` (see below), only whole records and never more than 118 characters, because rotctld cuts raw replies at 127. A `+` at the end means more records may be waiting. |
 
 ### Registers
@@ -69,6 +95,8 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | d | Unstick: not implemented, reads 0 | 0 |
 | e | Allow PWM above 980 Hz (needs hardware changes, see below) | 0 |
 | f | Park position, degrees | 0 |
+| g | Where the reed contact opens within a degree, degrees (0.1–0.9). Compare with `PD` field `e` (per mille). | 0.8 |
+| h | Coasting after the motor is cut, as a time: coasting distance = speed × this, ms (0–1000) | 180 |
 
 ## PWM frequency and the hardware
 
@@ -153,7 +181,8 @@ The AVR-level test (`host/avrtest.cpp`) covers what the host simulator cannot:
 - the LCD contents (HD44780 model);
 - EEPROM: takeover from a K3NG image, the position block and the K3NG mirror;
 - the watchdog being enabled;
-- stack depth: at least 320 bytes never used;
+- stack depth: at least 310 bytes never used;
+- a 1.1 EEPROM (settings version 1, position slots in 0.5° counts) taken over;
 - a reset during a move (`GE64`, nothing moves by itself);
 - a torn position write (the previous slot is used);
 - a settings image with a valid CRC but impossible values (defaults);

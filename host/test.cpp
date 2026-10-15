@@ -37,8 +37,8 @@ static void test_overlap() {
     s.send("AZ350\n"); settle(s);
     printf("  10 -> 350: raw %.1f\n", s.fw_pos());
     CHECK(std::fabs(s.fw_pos() - (-10.0)) <= 0.5, "10 -> 350 should end at raw -10, got %.1f", s.fw_pos());
-    CHECK(s.send("AZ\n") == "AZ350.0\r\n", "AZ reply %s", s.send("AZ\n").c_str());
-    CHECK(s.send("AR\n") == "AR-10.0\r\n", "AR reply %s", s.send("AR\n").c_str());
+    CHECK(s.send("AZ\n").rfind("AZ3", 0) == 0 && std::fabs(s.theta + 10.0) <= 0.4, "AZ reply %s (true %.2f)", s.send("AZ\n").c_str(), s.theta);
+    CHECK(s.send("AR\n").rfind("AR-", 0) == 0, "AR reply %s", s.send("AR\n").c_str());
     s.send("AZ20\n"); settle(s);
     CHECK(std::fabs(s.fw_pos() - 20.0) <= 0.5, "-10 -> 20: %.1f", s.fw_pos());
     CHECK(s.violations == 0, "violations %d", s.violations);
@@ -129,9 +129,8 @@ static void test_short_moves() {
     expect += d;
     char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", expect); s.send(b);
     settle(s);
-    CHECK(std::fabs(s.fw_pos() - expect) <= 0.5, "step %+.1f: expect %.1f got %.1f", d, expect, s.fw_pos());
+    CHECK(std::fabs(s.theta - expect) <= 0.5 && std::fabs(s.fw_pos() - s.theta) <= 0.3, "step %+.1f: expect %.1f got fw %.1f true %.2f", d, expect, s.fw_pos(), s.theta);
   }
-  CHECK(std::fabs(s.fw_pos() - s.theta) < 0.8, "fw %.1f true %.2f", s.fw_pos(), s.theta);
   CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
 }
 
@@ -281,7 +280,7 @@ static void test_log() {
   printf("  %zu events, %d edges (%d coasting), %d samples, others: %s lost %d\n", all.size(), edges, coast, samples, seqs.c_str(), lost);
   CHECK(lost == 0, "events lost while polling every 250 ms");
   CHECK(seqs == "14 2 3 4 6 7 ", "state events CMD START RUN SLOW CUT IDLE, got %s", seqs.c_str());
-  CHECK(edges == 6, "3 deg = 6 edges, got %d", edges);
+  CHECK(edges == 5 || edges == 6, "3 deg = 5 or 6 edges (the last one may be left to the coasting), got %d", edges);
   CHECK(samples > 5, "PWM samples while driven: %d", samples);
   bool mono = true; for (size_t i = 1; i < all.size(); i++) if (all[i].t < all[i - 1].t || all[i].seq != (uint16_t)(all[i - 1].seq + 1)) mono = false;
   CHECK(mono, "time and sequence increase");
@@ -378,7 +377,45 @@ static void test_v11() {
   }
 }
 
+static void test_v12() {
+  printf("1.2: edge positions (contact closed 0.79 deg of each degree): precision at rest, calibration, register g, duty\n");
+  {
+    Sim s(150.0);
+    std::mt19937 r(3);
+    double fw_err = 0, tgt_err = 0, sum_t = 0; int n = 0;
+    for (int i = 0; i < 80; i++) {
+      double t = std::uniform_int_distribution<int>(1000, 2000)(r) / 10.0;
+      char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", t); s.send(b); settle(s);
+      fw_err = std::max(fw_err, std::fabs(s.fw_pos() - s.theta));
+      tgt_err = std::max(tgt_err, std::fabs(s.theta - t)); sum_t += std::fabs(s.theta - t); n++;
+    }
+    printf("  80 random gotos (both directions): max |fw - true| %.2f, |true - target| max %.2f mean %.2f\n", fw_err, tgt_err, sum_t / n);
+    CHECK(fw_err <= 0.2, "position at rest within 0.2 deg of the truth: %.2f", fw_err);
+    CHECK(tgt_err <= 0.4, "landing within 0.4 deg of the target: %.2f", tgt_err);
+    int16_t d = s.rot.duty_permille();
+    printf("  PD duty: %s\n", s.send("PD\n").c_str());
+    CHECK(d >= 770 && d <= 810, "measured closed share %d permille (sim 790)", d);
+  }
+  for (double start : {200.3, 200.9}) {                      // closed / open contact at the calibration
+    Sim s(start);
+    int lvl = s.obs_level;
+    s.send("CW7,201.0\n");
+    s.send("AZ205\n"); settle(s);
+    double off = s.fw_pos() - s.theta, exp_off = 201.0 - start;
+    printf("  CW7 at true %.1f (contact %s): fw-true after a move %.2f (calibration offset %.2f)\n", start, lvl ? "open" : "closed", off, exp_off);
+    CHECK(std::fabs(off - exp_off) <= 0.25, "calibration keeps its offset (%.2f vs %.2f)", off, exp_off);
+    CHECK(s.rot.errors == 0, "errors %d", s.rot.errors);
+  }
+  {
+    Sim s(100.0);
+    CHECK(s.send("CR g\n") == "CRg,0.8\r\n", "register g default: %s", s.send("CR g\n").c_str());
+    s.send("CWg,0.5\n"); CHECK(s.send("CRg\n") == "CRg,0.5\r\n", "CWg,0.5 stored");
+    s.send("CWg,1.5\n"); CHECK(s.send("CRg\n") == "CRg,0.5\r\n", "CWg,1.5 refused");
+  }
+}
+
 int main() {
+  test_v12();
   test_v11();
   test_protocol();
   test_log();

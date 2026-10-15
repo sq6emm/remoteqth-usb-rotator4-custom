@@ -129,6 +129,8 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
     put("PDa"); put_u32(a); put(",r"); put_u32(r); put(",c"); put_u32(c);
     put(",h"); put_u32(rot.n_holds); put(",s"); put_u32(rot.n_stalls); put(",t"); put_u32(rot.n_timeouts);
     put(",p"); put_u32(rot.pwm_now); put(",f"); put_u32(rot.pwm_hz);
+    int16_t d = rot.duty_permille();                // measured contact closed share of a degree, per mille
+    put(",e"); if (d < 0) put("-"); else put_u32((uint32_t)d);
     return;
   }
 }

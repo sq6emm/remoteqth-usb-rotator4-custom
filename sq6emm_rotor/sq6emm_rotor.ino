@@ -1,6 +1,7 @@
 // SQ6EMM rotor controller firmware - hardware layer (ATmega328P, RemoteQTH Rotator Interface 4.0.3)
 // Easycomm III on the USB serial port (Hamlib rotctld -m 204), SPID RAU pulse sensing, soft start / soft stop.
 // The motion logic lives in core.cpp (also built and tested on the PC, see host/).
+#include <stddef.h>
 #include <EEPROM.h>
 #include <LiquidCrystal.h>
 #include <avr/wdt.h>
@@ -27,11 +28,12 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 #define EE_SET_ADDR         128
 #define EE_SET_MAGIC0       'S'
 #define EE_SET_MAGIC1       'R'
-#define EE_SET_VERSION      1
+#define EE_SET_VERSION      2      // 2 (1.2): + edge_frac at the end; a version 1 image is taken over
 #define EE_RING_ADDR        256
 #define EE_RING_SLOTS       128
-#define EE_SLOT             5      // cnt lo, cnt hi, seq, flags, crc
+#define EE_SLOT             5      // pos lo, pos hi, seq, flags, crc
 #define SLOT_MOVING         1
+#define SLOT_TENTHS         2      // 1.2: the value is the position in tenths (before: 0.5 deg counts)
 #define MIRROR_EVERY_MS     600000UL   // the K3NG mirror is refreshed at most every 10 min (and after CW7)
 
 static uint8_t crc8(const uint8_t *p, uint8_t n) {
@@ -49,13 +51,17 @@ static void save_settings() {
 }
 
 static bool load_settings() {
+  uint8_t ver = EEPROM.read(EE_SET_ADDR + 2);
   if (EEPROM.read(EE_SET_ADDR) != EE_SET_MAGIC0 || EEPROM.read(EE_SET_ADDR + 1) != EE_SET_MAGIC1 ||
-      EEPROM.read(EE_SET_ADDR + 2) != EE_SET_VERSION) return false;
-  Settings t; uint8_t *p = (uint8_t *)&t;
-  for (uint8_t i = 0; i < sizeof(Settings); i++) p[i] = EEPROM.read(EE_SET_ADDR + 3 + i);
-  if (crc8(p, sizeof(Settings)) != EEPROM.read(EE_SET_ADDR + 3 + sizeof(Settings))) return false;
+      (ver != EE_SET_VERSION && ver != 1)) return false;
+  uint8_t n = ver == 1 ? offsetof(Settings, edge_frac) : sizeof(Settings);   // version 1: everything before edge_frac
+  Settings t = rot.s;                            // defaults (set before): fields a version 1 image lacks keep them
+  uint8_t *p = (uint8_t *)&t;
+  for (uint8_t i = 0; i < n; i++) p[i] = EEPROM.read(EE_SET_ADDR + 3 + i);
+  if (crc8(p, n) != EEPROM.read(EE_SET_ADDR + 3 + n)) return false;
   if (!settings_ok(t)) return false;              // a CRC8 can pass by chance: every field must be in range too
   rot.s = t;
+  if (ver != EE_SET_VERSION) save_settings();
   return true;
 }
 
@@ -73,6 +79,7 @@ static bool slot_read(uint8_t i, int16_t *c, uint8_t *seq, uint8_t *flags) {
 }
 
 static void slot_write(int16_t c, uint8_t flags) {
+  flags |= SLOT_TENTHS;
   uint8_t b[EE_SLOT] = {(uint8_t)c, (uint8_t)(c >> 8), ring_seq, flags, 0};
   b[4] = crc8(b, 4);
   for (uint8_t k = 0; k < EE_SLOT; k++) EEPROM.update(EE_RING_ADDR + ring_next * EE_SLOT + k, b[k]);
@@ -81,11 +88,11 @@ static void slot_write(int16_t c, uint8_t flags) {
 }
 
 static void save_position(uint32_t now) {
-  int16_t c = rot.cnt_copy();
+  int16_t c = rot.pos();
   slot_write(c, 0);
   rot.saved(c);
   if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC && (!mirror_done || rot.calibrated_now || now - t_mirror >= MIRROR_EVERY_MS)) {
-    float f = c * 0.5f; EEPROM.put(EE_K3NG_LAST_AZ, f);
+    float f = c * 0.1f; EEPROM.put(EE_K3NG_LAST_AZ, f);
     t_mirror = now; mirror_done = true;
   }
   rot.calibrated_now = false;
@@ -100,12 +107,12 @@ static uint8_t load_position() {
     if (!any || (int8_t)(seq - bseq) > 0) { any = true; best = i; bseq = seq; bflags = flags; bc = c; }
   }
   if (any) {
-    rot.cnt = bc; ring_next = (best + 1) % EE_RING_SLOTS; ring_seq = bseq + 1; ring_moving = bflags & SLOT_MOVING;
+    rot.set_raw(bflags & SLOT_TENTHS ? bc : bc * 5); ring_next = (best + 1) % EE_RING_SLOTS; ring_seq = bseq + 1; ring_moving = bflags & SLOT_MOVING;
     return ring_moving ? 2 : 1;
   }
   if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC) {          // first start after the K3NG firmware
     float f; EEPROM.get(EE_K3NG_LAST_AZ, f);
-    if (f == f && f > -45.0f && f < 405.0f) { rot.cnt = (int16_t)(f >= 0 ? f * 2 + 0.5f : f * 2 - 0.5f); return 3; }
+    if (f == f && f > -45.0f && f < 405.0f) { rot.set_raw((int16_t)(f >= 0 ? f * 10 + 0.5f : f * 10 - 0.5f)); return 3; }
   }
   return 0;
 }
@@ -278,8 +285,10 @@ void setup() {
 
   rot.defaults();
   if (!load_settings()) { rot.defaults(); save_settings(); }
+  delayMicroseconds(200);                         // pull-up settled: the contact level picks the stretch of the position
+  rot.last_level = (PIND & _BV(PD2)) ? 1 : 0;
   uint8_t lp = load_position();
-  if (lp == 0) { rot.cnt = 0; rot.errors |= ER_NOPOS; }
+  if (lp == 0) { rot.set_raw(0); rot.errors |= ER_NOPOS; }
   else if (lp == 2) rot.errors |= ER_UNCERT;
 
   Serial.begin(SERIAL_BAUD);
@@ -313,7 +322,7 @@ void loop() {
   while (!tx && Serial.available()) tx = proto.feed((char)Serial.read(), now);
   buttons(now);
   rot.tick(now);
-  if (rot.driving() && !ring_moving && !(rot.errors & ER_NOPOS)) slot_write(rot.cnt_copy(), SLOT_MOVING);
+  if (rot.driving() && !ring_moving && !(rot.errors & ER_NOPOS)) slot_write(rot.pos(), SLOT_MOVING);
   if (rot.save_due(now, ring_moving)) save_position(now);
   if (rot.settings_dirty) { save_settings(); rot.settings_dirty = false; }
   static uint32_t t_lcd = 0;

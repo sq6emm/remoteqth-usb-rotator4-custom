@@ -3,7 +3,7 @@
 // motor-side reed pulses (1 pulse per degree, both edges counted = 0.5 deg).
 #pragma once
 
-#define FW_VERSION "SQ6EMM-rotor-1.1"
+#define FW_VERSION "SQ6EMM-rotor-1.2"
 
 // ---- pins (RemoteQTH 4.0.3, see docs/Rotator-Interface-4.0.3.pdf) ----
 #define PIN_PULSE      2    // PD2, PULSE-CCW line from the rotator (10k pull-up, 1k/100n/1k + BAV99); contact closed = low
@@ -41,7 +41,7 @@
 #define SOFT_CUT_MARGIN      24   // reaching a target / range end above floor + this PWM: soft stop instead of a cut
 #define BRAKE_HOLD_MS      3000   // brake released (RL3 / START LED) until this long after the motor stopped
 #define SAVE_AFTER_MS      1000   // position saved to EEPROM this long after the last pulse while idle
-#define TOLERANCE_T           4   // stop when the remaining distance is <= 0.4 deg (counts are 0.5 deg)
+#define SHORT_COAST_T         3   // a move too short to know its speed coasts about 0.3 deg past the edge where it stops
 #define LIMIT_ZONE_T         50   // manual moves / range ends: slow down over the last 5 deg
 #define SLOW_PWM_CAP        200   // slow-down ramps start at most at this PWM
 #define OVERSHOOT_T          10   // overshoot correction (register a) when off target by >= 1.0 deg
@@ -82,5 +82,7 @@
 #define DEF_JAM            1      // b: stall guard
 #define DEF_ENDPOINTS      1      // c: range ends enforced
 #define DEF_FAST_PWM       0      // e: allow PWM > 980 Hz (needs a gate driver + Schottky freewheel diode)
+#define DEF_EDGE_FRAC      8      // g: the reed contact opens 0.8 deg into each degree (measured 0.79 on 2026-10-15)
+#define DEF_COAST_MS     180      // h: coasting after the cut = speed x 180 ms (from the STOP log of 2026-10-15)
 #define DEF_PARK           0      // f: park azimuth, 0.1 deg
 #define PWM_SAFE_MAX_HZ  980      // without register e

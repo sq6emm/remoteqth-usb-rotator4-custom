@@ -11,7 +11,7 @@ void Rotor::defaults() {
   s.az_min = DEF_AZ_MIN;     s.az_max = DEF_AZ_MAX;
   s.ramp_up = DEF_RAMP_UP;   s.ramp_down = DEF_RAMP_DOWN; s.slow_zone = DEF_SLOW_ZONE;
   s.report_raw = DEF_REPORT_RAW; s.overshoot = DEF_OVERSHOOT; s.jam = DEF_JAM; s.endpoints = DEF_ENDPOINTS;
-  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK;
+  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK; s.edge_frac = DEF_EDGE_FRAC; s.coast_ms = DEF_COAST_MS; s.pos_off = 0;
 }
 
 void Rotor::set_clamps() {
@@ -25,7 +25,7 @@ bool settings_ok(const Settings &s) {
          s.az_min >= -3600 && s.az_min <= 0 && s.az_max >= 3600 && s.az_max <= 7200 && s.az_max - s.az_min >= 3600 &&
          s.ramp_up >= 100 && s.ramp_up <= 10000 && s.ramp_down >= 100 && s.ramp_down <= 10000 && s.slow_zone <= 300 &&
          s.report_raw <= 1 && s.overshoot <= 1 && s.jam <= 1 && s.endpoints <= 1 && s.fast_pwm <= 1 &&
-         s.park >= s.az_min && s.park <= s.az_max;
+         s.park >= s.az_min && s.park <= s.az_max && s.edge_frac >= 1 && s.edge_frac <= 9 && s.coast_ms <= 1000 && s.pos_off >= -5 && s.pos_off <= 4;
 }
 
 void Rotor::begin(uint32_t now) {
@@ -35,14 +35,14 @@ void Rotor::begin(uint32_t now) {
   if (s.pwm_freq > PWM_SAFE_MAX_HZ && !s.fast_pwm) s.pwm_freq = DEF_PWM_FREQ;
   pwm_hz = hw_pwm_freq(s.pwm_freq);
   t_tick = t_idle = rej_window_ms = now;
-  saved_cnt = cnt; has_saved = true;
+  saved_pt = pos(); has_saved = true;
 }
 
 // ---------------------------------------------------------------- pulse input (interrupt context)
 // The reed line is sampled at PULSE_SAMPLE_HZ; a level change counts once it has been seen PULSE_STABLE_N times in a
 // row. A change that reverts earlier is chatter or an EMI spike (counted in n_rej). Every accepted level change is
-// half a degree. The slew drive cannot be back-driven, so changes with the motor off are coasting in the last
-// direction.
+// edge between two contact stretches; the position becomes that edge's place (n.0 or n.frac). The slew drive cannot be
+// back-driven, so changes with the motor off are coasting in the last direction.
 void Rotor::sample(uint8_t level, uint32_t now_ms) {
   if (level == last_level) {
     if (pend_n) { n_rej++; pend_n = 0; }
@@ -56,8 +56,11 @@ void Rotor::sample(uint8_t level, uint32_t now_ms) {
   int8_t d = drive_dir;
   uint8_t coast = 0;
   if (!d) { d = last_dir; n_coast++; coast = 1; }
-  if (d > 0) { if (cnt < clamp_hi) cnt++; }
-  else if (d < 0) { if (cnt > clamp_lo) cnt--; }
+  if (d > 0) { if (cnt < clamp_hi) { cnt++; pt = edge_t(cnt); } }
+  else if (d < 0) { if (cnt > clamp_lo) { pt = edge_t(cnt); cnt--; } }
+  if (!coast && pwm_now == pwm_edge && dt < 4000) { dsum[level] += dt; dn[level]++; }   // a rising edge ends a closed stretch
+  if (!coast && run_edges < 255) run_edges++;
+  pwm_edge = pwm_now;
   log_isr(E_EDGE, now_ms, cnt, (level << 6) | (coast << 7));
 }
 
@@ -103,7 +106,76 @@ uint32_t Rotor::last_edge(uint32_t now) const {
 }
 
 int16_t Rotor::cnt_copy() const { int16_t c; ATOMIC_BEGIN c = cnt; ATOMIC_END return c; }
-int16_t Rotor::pos() const { return cnt_copy() * 5; }
+int16_t Rotor::pos() const { int16_t p; ATOMIC_BEGIN p = pt; ATOMIC_END return p; }
+
+int16_t Rotor::edge_t(int16_t c) const {
+  int16_t n = c >= 0 ? c / 2 : -((1 - c) / 2);     // floor(c / 2)
+  return n * 10 + ((c - 2 * n) ? s.edge_frac : 0) + s.pos_off;
+}
+
+// the stretch with the contact 'level' (0 = closed = even) nearest to the position t
+int16_t Rotor::stretch(int16_t t, uint8_t level) const {
+  int16_t u = t - s.pos_off;                       // in the grid's own frame
+  int16_t n = u >= 0 ? u / 10 : -((9 - u) / 10);  // floor(u / 10)
+  int16_t c = 2 * n + (u - n * 10 >= s.edge_frac ? 1 : 0);
+  if ((c & 1) != (level & 1)) c += (t - edge_t(c) < edge_t(c + 1) - t) ? -1 : 1;
+  return c;
+}
+
+void Rotor::set_raw(int16_t t) {
+  int16_t c = stretch(t, last_level);
+  ATOMIC_BEGIN pt = t; cnt = c; ATOMIC_END
+}
+
+int16_t Rotor::next_edge(int8_t d, int16_t c, int16_t p) const {
+  int16_t e;
+  if (d > 0) { e = edge_t(c + 1); if (e <= p) e = edge_t(c + 2); }
+  else { e = edge_t(c); if (e >= p) e = edge_t(c - 1); }
+  return e;
+}
+
+// without a speed: half the way to the next edge (0.4 before a wide stretch, 0.1 before the narrow open one) -
+// stopping here is then never further from the target than stopping at the next edge
+int16_t Rotor::tol(int8_t d) const {
+  int16_t c, p; ATOMIC_BEGIN c = cnt; p = pt; ATOMIC_END
+  int16_t g = d > 0 ? next_edge(d, c, p) - p : p - next_edge(d, c, p);
+  return g > 1 ? g / 2 : 0;
+}
+
+// speed over the stretch just crossed (the latest one follows the slow-down best), tenths/s; 0 = unknown
+int16_t Rotor::speed_tps(uint32_t now, uint32_t le) const {
+  uint16_t a; uint8_t n; int16_t c, p; int8_t d;
+  ATOMIC_BEGIN a = edge_dt[0]; n = run_edges; c = cnt; p = pt; d = drive_dir; ATOMIC_END
+  if (n < 2 || !a || a > 2000 || now - le > 1500) return 0;
+  int16_t len = d > 0 ? p - edge_t(c - 1) : edge_t(c + 2) - p;
+  return len <= 0 ? 0 : (int16_t)((uint32_t)len * 1000 / a);
+}
+
+// between edges the position is the last edge plus speed x time - but never at the next edge, which has not come yet
+int16_t Rotor::pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const {
+  int16_t c, p; ATOMIC_BEGIN c = cnt; p = pt; ATOMIC_END
+  if (!v || !d) return p;
+  int16_t g = d > 0 ? next_edge(d, c, p) - p : p - next_edge(d, c, p);
+  int32_t x = (int32_t)v * (int32_t)(now - le) / 1000;
+  if (x > g - 1) x = g - 1;
+  if (x < 0) x = 0;
+  return p + d * (int16_t)x;
+}
+
+void Rotor::mark_cut(uint32_t now) {
+  uint32_t le = last_edge(now);
+  int8_t d = drive_dir;
+  v_cut = d ? speed_tps(now, le) : 0;
+  est_cut = pos_est(d, v_cut, now, le); dir_cut = d; est_pending = d != 0;
+}
+
+int16_t Rotor::duty_permille() const {
+  uint32_t s1, s0; uint16_t n1, n0;
+  ATOMIC_BEGIN s1 = dsum[1]; s0 = dsum[0]; n1 = dn[1]; n0 = dn[0]; ATOMIC_END
+  if (n1 < 8 || n0 < 8) return -1;
+  uint32_t m1 = s1 / n1, m0 = s0 / n0;
+  return (int16_t)(m1 * 1000 / (m1 + m0));
+}
 int16_t Rotor::az() const { int16_t a = pos() % 3600; return a < 0 ? a + 3600 : a; }
 
 uint8_t Rotor::status() const {
@@ -152,6 +224,7 @@ void Rotor::soft_stop() {
 
 void Rotor::stop_now() {
   want = false; mode = M_NONE; holding = false;
+  if (pwm_now) mark_cut(t_tick);
   hw_pwm(0); pwm_now = 0; ramp_acc = 0;
   log_ev(E_STOP, t_tick);
   if (st != S_IDLE && st != S_RELAY_OFF) set_state(S_RELAY_OFF, t_tick);
@@ -168,8 +241,13 @@ void Rotor::set_position(int16_t t) {
     }
     t = best;
   }
-  int16_t c = t2c(t);
-  ATOMIC_BEGIN cnt = c; ATOMIC_END
+  // the edges are physical: the antenna is where pos() says within its stretch, so the calibration moves the whole
+  // grid by t - pos(), whole degrees in the counter and the rest in pos_off (a fraction a 0.5 deg grid could not hold)
+  int16_t o = (int16_t)((t - p + s.pos_off) % 10);
+  if (o < 0) o += 10;
+  if (o >= 5) o -= 10;
+  if (o != s.pos_off) { s.pos_off = (int8_t)o; settings_dirty = true; }
+  set_raw(t);
   errors &= ~(ER_NOPOS | ER_UNCERT);
   calibrated_now = true;
   if (mode == M_TARGET && st == S_IDLE) mode = M_NONE;   // the old target no longer means anything
@@ -223,7 +301,7 @@ static uint8_t slow_pwm(int16_t d, int16_t z, uint8_t c, uint8_t floor) {
 bool Rotor::save_due(uint32_t now, bool force) const {
   if (st != S_IDLE || (errors & ER_NOPOS)) return false;   // an unknown position is never stored as if it were valid
   if ((now - last_edge(now)) < SAVE_AFTER_MS) return false;
-  return force || !has_saved || cnt_copy() != saved_cnt || calibrated_now;
+  return force || !has_saved || pos() != saved_pt || calibrated_now;
 }
 
 // ---------------------------------------------------------------- motion state machine
@@ -251,10 +329,14 @@ void Rotor::tick(uint32_t now) {
   if (want) {
     if (mode == M_TARGET) {
       int16_t diff = tgt - p;
-      need = iabs16(diff) <= TOLERANCE_T ? 0 : (diff > 0 ? 1 : -1);
+      int8_t dd = diff > 0 ? 1 : -1;
+      int16_t c, q; ATOMIC_BEGIN c = cnt; q = pt; ATOMIC_END
+      int16_t land = iabs16(next_edge(dd, c, q) - q) + SHORT_COAST_T;   // a short move ends about here (no speed yet)
+      int16_t ad = iabs16(diff);
+      need = (ad <= tol(dd) || ad <= iabs16(land - ad)) ? 0 : dd;      // move only if it ends closer than staying
     } else if (mode == M_MANUAL) {
       int16_t dl = man_dir > 0 ? hi() - p : p - lo();
-      need = (s.endpoints && dl <= TOLERANCE_T) ? 0 : man_dir;
+      need = (s.endpoints && dl <= tol(man_dir)) ? 0 : man_dir;
     }
   }
 
@@ -269,11 +351,24 @@ void Rotor::tick(uint32_t now) {
       holding = false; want = false;
       mdir = need;
       hw_brake(true); brake_on = true;
-      ATOMIC_BEGIN drive_dir = need; last_dir = need; ATOMIC_END
+      ATOMIC_BEGIN drive_dir = need; last_dir = need; run_edges = 0; ATOMIC_END
+      est_pending = false;
       hw_relay(need);
       ramp_acc = 0; pwm_now = 0;
       set_state(S_RELAY_ON, now);
       break;
+    }
+    if (est_pending && (now - t_idle) >= COAST_MIN_MS && (now - le) >= QUIET_MS) {   // at rest: where between the edges
+      est_pending = false;
+      int16_t e = est_cut + dir_cut * (int16_t)((int32_t)v_cut * s.coast_ms / 1000);
+      ATOMIC_BEGIN
+        int16_t lo_e = edge_t(cnt), hi_e = edge_t(cnt + 1);
+        if (e < lo_e) e = lo_e;
+        if (e > hi_e) e = hi_e;
+        if (pt == lo_e && e == hi_e) e = hi_e - 1;  // still inside: the upper edge has not been crossed
+        if (pt == hi_e && e == lo_e) e = lo_e + 1;
+        pt = e;
+      ATOMIC_END
     }
     if (brake_on && (now - t_idle) >= BRAKE_HOLD_MS) { hw_brake(false); brake_on = false; }
     // one correction move after an overshoot (register a), once the coasting is over
@@ -311,14 +406,19 @@ void Rotor::tick(uint32_t now) {
       else { set_state(S_SOFT, now); break; }      // reversal: soft stop first, IDLE starts the other way
     }
     uint8_t c = cap(), w = c;
+    int16_t v = speed_tps(now, le);               // known from the 3rd edge of the run: then the cut anticipates
+    int16_t pe = pos_est(mdir, v, now, le);       // the position between edges and the coasting after the cut
+    int16_t coast = (int16_t)((int32_t)v * s.coast_ms / 1000);
+    int16_t close = v ? 0 : tol(mdir);
     if (mode == M_TARGET) {
-      int16_t d = (tgt - p) * mdir;               // remaining distance in the direction of travel
-      if (d <= TOLERANCE_T) {                      // reached (or passed)
+      int16_t d = (tgt - pe) * mdir - coast;      // remaining distance in the direction of travel, after coasting
+      if (d <= close) {                            // reached (or passed): the next edge would not be closer
         if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) {   // still fast (target moved onto us): soft stop,
           want = true;                                             // then come back once the coasting is over
           set_state(S_SOFT, now);
           break;
         }
+        mark_cut(now);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;      // normal case: the slow-down left us at the floor PWM
         set_state(S_RELAY_OFF, now);
         break;
@@ -329,11 +429,12 @@ void Rotor::tick(uint32_t now) {
       break;
     }
     if (s.endpoints) {
-      int16_t dl = dist_to_limit();
-      if (dl <= TOLERANCE_T) {
+      int16_t dl = (mdir > 0 ? hi() - pe : pe - lo()) - coast;
+      if (dl <= close) {
         log_ev(E_LIMIT, now);
         mode = M_NONE; want = false;
         if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) { set_state(S_SOFT, now); break; }
+        mark_cut(now);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;
         set_state(S_RELAY_OFF, now);
         break;
@@ -355,6 +456,7 @@ void Rotor::tick(uint32_t now) {
     ramp_acc = ramp_acc > dec ? ramp_acc - dec : 0;
     uint8_t r = ramp_acc >> 8;
     if (r <= s.pwm_floor) {
+      mark_cut(now);
       hw_pwm(0); pwm_now = 0; ramp_acc = 0;
       set_state(S_RELAY_OFF, now);
     } else if (r != pwm_now) {
@@ -439,6 +541,8 @@ bool Rotor::reg_read(char r, char *out) const {
   case 'd': fmt_u32(out, 0); break;              // unstick: not implemented
   case 'e': fmt_u32(out, s.fast_pwm); break;
   case 'f': fmt_tenths(out, s.park); break;
+  case 'g': fmt_tenths(out, s.edge_frac); break;
+  case 'h': fmt_u32(out, s.coast_ms); break;
   default: return false;
   }
   return true;
@@ -446,8 +550,8 @@ bool Rotor::reg_read(char r, char *out) const {
 
 bool Rotor::reg_write(char r, const char *val) {
   bool ok; int32_t v = 0; int16_t t = 0;
-  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c')) return false;   // range / position only at rest
-  bool angle = (r == '3' || r == '4' || r == '7' || r == '8' || r == 'f');
+  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c' || r == 'g' || r == 'h')) return false;   // range / position only at rest
+  bool angle = (r == '3' || r == '4' || r == '7' || r == '8' || r == 'f' || r == 'g');
   if (angle) { t = parse_tenths(val, &ok); if (!ok) return false; }
   else if (!parse_int(val, &v)) return false;
   bool flag = (v == 0 || v == 1);
@@ -475,6 +579,8 @@ bool Rotor::reg_write(char r, const char *val) {
     if (!v && s.pwm_freq > PWM_SAFE_MAX_HZ) { s.pwm_freq = DEF_PWM_FREQ; pwm_hz = hw_pwm_freq(s.pwm_freq); }
     break;
   case 'f': if (t < s.az_min || t > s.az_max) return false; s.park = t; break;
+  case 'g': if (t < 1 || t > 9) return false; s.edge_frac = t; set_raw(pos()); break;
+  case 'h': if (v < 0 || v > 1000) return false; s.coast_ms = v; break;
   default: return false;
   }
   settings_dirty = true;

@@ -1,5 +1,7 @@
 // Rotor core: position counting, motion control, configuration registers. No Arduino dependencies.
-// Angles are integers in 0.1 deg ("tenths"); the pulse counter counts 0.5 deg steps (1 count = 5 tenths).
+// Angles are integers in 0.1 deg ("tenths"). The reed contact of the SPID RAU closes at the start of each degree and opens
+// again at edge_frac (measured 0.79): the counter counts the stretches between edges (even = closed, n..n+frac; odd =
+// open, n+frac..n+1), and the position is the edge last crossed - n.0 or n.frac, whichever side it was crossed from.
 // "Raw" positions run over the whole range (default -30.0 .. 390.0 deg); the azimuth is raw modulo 360.
 #pragma once
 #include <stdint.h>
@@ -21,6 +23,9 @@ struct Settings {             // register
   uint8_t  endpoints;         // c
   uint8_t  fast_pwm;          // e
   int16_t  park;              // f (tenths)
+  uint8_t  edge_frac;         // g (tenths): where the contact opens within a degree (1.2)
+  uint16_t coast_ms;          // h (ms): coasting after the cut = speed x this (1.2)
+  int8_t   pos_off;           // tenths, -5..4: where the edge grid sits within a degree, set by CW7 (1.2; new fields last)
 };
 
 // GS status bits (Easycomm III)
@@ -49,7 +54,11 @@ public:
   Settings s;
 
   // ---- shared with the pulse interrupt ----
-  volatile int16_t cnt = 0;          // position in 0.5 deg counts
+  volatile int16_t cnt = 0;          // contact stretch: 2n = closed (n .. n+frac), 2n+1 = open (n+frac .. n+1)
+  volatile int16_t pt = 0;           // position (tenths): the edge last crossed, or the calibrated / loaded value
+  volatile uint32_t dsum[2] = {0, 0};      // contact duty at steady drive: [1] closed stretches (ms), [0] open ones
+  volatile uint16_t dn[2] = {0, 0};
+  volatile uint8_t run_edges = 0;    // edges while driven in this run (speed is known from the 3rd)
   volatile int8_t  drive_dir = 0;    // relays: +1 CW, -1 CCW, 0 off
   volatile int8_t  last_dir = 0;     // direction of the last drive (coasting pulses count this way)
   volatile uint32_t last_edge_ms = 0;
@@ -75,6 +84,9 @@ public:
   void tick(uint32_t now_ms);                        // call every main-loop pass
 
   int16_t pos() const;                               // raw position, tenths (atomic copy)
+  void set_raw(int16_t t);                           // position t at rest; the stretch follows from t and the contact
+  int16_t edge_t(int16_t c) const;                   // tenths of the edge at the start of stretch c
+  int16_t duty_permille() const;                     // measured closed share of a degree (-1: no data yet)
   int16_t az() const;                                // 0..3599
   int16_t target() const { return tgt; }
   int8_t  dir() const { return mdir; }
@@ -94,14 +106,14 @@ public:
   void set_position(int16_t t);  // calibration: 0..3599 keeps the current turn, other values are raw
   void clear_errors() { errors &= (ER_NOPOS | ER_UNCERT); }   // position errors only go away with CW7
 
-  // registers ('0'..'9', 'a'..'f'); text in/out, angles with one decimal
+  // registers ('0'..'9', 'a'..'g'); text in/out, angles with one decimal
   bool reg_read(char r, char *out) const;
   bool reg_write(char r, const char *val);
   bool settings_dirty = false;
 
   // position persistence: the hardware layer saves when due()
   bool save_due(uint32_t now_ms, bool force) const;    // idle, coasting over, and the position changed (or force)
-  void saved(int16_t written) { saved_cnt = written; has_saved = true; }
+  void saved(int16_t written) { saved_pt = written; has_saved = true; }
   bool calibrated_now = false;                       // set by CW7: the hardware layer refreshes the K3NG mirror
   int16_t cnt_copy() const;
 
@@ -118,7 +130,15 @@ private:
   bool corrected = false, holding = false, brake_on = false;
   uint32_t t_state = 0, t_move = 0, t_tick = 0, t_idle = 0, t_cmd = 0;
   uint16_t ramp_acc = 0;            // PWM * 256 while ramping
-  int16_t saved_cnt = 0; bool has_saved = false;
+  int16_t saved_pt = 0; bool has_saved = false;
+  uint8_t pwm_edge = 0;             // PWM at the previous edge (duty measurement only at steady PWM)
+  int16_t stretch(int16_t t, uint8_t level) const;
+  int16_t tol(int8_t d) const;      // stop tolerance in direction d (tenths), when the speed is not known
+  int16_t next_edge(int8_t d, int16_t c, int16_t p) const;
+  int16_t speed_tps(uint32_t now, uint32_t le) const;                  // tenths/s over the last degree, 0 = unknown
+  int16_t pos_est(int8_t d, int16_t v, uint32_t now, uint32_t le) const;   // last edge + travel since (before the next)
+  void mark_cut(uint32_t now);      // motor current off: remember where and how fast, for the rest position
+  int16_t est_cut = 0, v_cut = 0; int8_t dir_cut = 0; bool est_pending = false;
   uint32_t rej_window_ms = 0; uint16_t rej_in_window = 0;
 
   int16_t lo() const { return s.az_min; }
