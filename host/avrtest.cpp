@@ -89,7 +89,7 @@ struct Bench {
 
   void boot(const std::vector<uint8_t> &eeprom, double start_deg) {
     memset(&fw, 0, sizeof fw);
-    if (elf_read_firmware("build/sq6emm_rotor.ino.elf", &fw)) { printf("cannot read the ELF\n"); exit(2); }
+    if (elf_read_firmware(getenv("ELF") ? getenv("ELF") : "build/sq6emm_rotor.ino.elf", &fw)) { printf("cannot read the ELF\n"); exit(2); }
     strcpy(fw.mmcu, "atmega328p"); fw.frequency = 16000000;
     avr = avr_make_mcu_by_name(fw.mmcu);
     avr_init(avr);
@@ -217,7 +217,19 @@ static std::vector<uint8_t> k3ng_eeprom(float az) {
   return e;
 }
 
-int main() {
+// replays the controller's history: the given EEPROM image booted by one firmware, the result dumped
+int chain_main(const char *in, const char *out) {
+  std::vector<uint8_t> img(1024, 0xFF);
+  FILE *f = fopen(in, "rb"); if (f) { fread(img.data(), 1, 1024, f); fclose(f); }
+  Bench b; b.boot(img, -10.0); b.run_ms(2000);
+  printf("VE %s CR5 %s CRg %s CRh %s CRi %s AR %s GE %s ee[130] %d\n", b.cmd("VE").c_str(), b.cmd("CR5").c_str(), b.cmd("CRg").c_str(),
+         b.cmd("CRh").c_str(), b.cmd("CRi").c_str(), b.cmd("AR").c_str(), b.cmd("GE").c_str(), b.ee(130));
+  f = fopen(out, "wb"); for (int i = 0; i < 1024; i++) fputc(b.ee(i), f); fclose(f);
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 3) return chain_main(argv[1], argv[2]);
   printf("== boot after the K3NG firmware (EEPROM magic 111, last_azimuth 91.0)\n");
   Bench b; b.boot(k3ng_eeprom(91.0f), 91.0);
   b.run_ms(1500);
@@ -383,6 +395,18 @@ int main() {
     o.cmd("AZ346.0");
     o.run_until([&] { return o.idle(); }, 30000); o.run_ms(1500);
     CHECK(std::fabs(o.theta - 346.0) <= 0.4 && std::fabs(o.fw_az() - o.theta) <= 0.2, "then a move lands: fw %.1f true %.2f", o.fw_az(), o.theta);
+  }
+
+  printf("== 1.2 settings image (version 2) taken over\n");
+  {
+    std::vector<uint8_t> img = k3ng_eeprom(10.0f);
+    // version 1 fields, then edge_frac u8, coast_ms u16, pos_off i8 (as 1.2 wrote them); ramp_up 3000, h 180, pos_off -3
+    uint8_t st[25] = {253, 64, 0xEA, 0x01, 0xD4, 0xFE, 0x3C, 0x0F, 0xB8, 0x0B, 0xE8, 0x03, 30, 0, 0, 0, 1, 1, 0, 0, 0, 8, 180, 0, 0xFD};
+    img[128] = 'S'; img[129] = 'R'; img[130] = 2;
+    memcpy(&img[131], st, 25); img[131 + 25] = Bench::crc8(st, 25);
+    Bench o; o.boot(img, 10.0); o.run_ms(1000);
+    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRh") == "CRh,180" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
+          "1.2 image: %s %s %s, version now %d", o.cmd("CR5").c_str(), o.cmd("CRh").c_str(), o.cmd("CRi").c_str(), o.ee(130));
   }
 
   printf("== buttons held at power-up (short / water) never start a move\n");

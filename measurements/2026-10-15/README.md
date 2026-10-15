@@ -38,3 +38,13 @@ CCW end first (from raw -18), then CW, then back to raw 342, unwound. The result
 - The gotos to -25 and 385 landed exactly. -30 to 385 (415 deg) took 93 s.
 
 The collector lost 420 of about 1500 events, all during the long full-speed moves. Three clients shared rotctld at 9600 baud (test script, collector, hamcam), and pulses plus samples come at about 20/s. Every state event at both ends was recorded.
+
+## Firmware 1.2 and 1.3 precision tests
+
+- `precision12.*` (1.2): landings on 120 reported 119.7 from below and 120.1 from above, every time. Both are clamp
+  limits: the rotator stopped before the expected edge. `coast_fit.py` gives the real coasting: about 50-75 ms x the speed
+  estimate at a landing, 177-223 ms x speed at a STOP from steady full speed. The fit led to 1.3 (registers i and h).
+- `precision13.*` (1.3): all 12 landings on 120 report 120.0, from both directions. The rest estimates fall inside the
+  stretch where the rotator stopped. The fractional targets 117.7, 125.6, 114.2 and 120.0 report exactly; 123.3 reports
+  123.1, and 120.5 from 120.0 stays (a 0.5 move cannot land closer). STOP from full speed: 1.01-1.22 deg = 226-273 ms
+  x speed (1.2 test: 177-223). PD e792: the contact is closed for 0.792 of each degree.
