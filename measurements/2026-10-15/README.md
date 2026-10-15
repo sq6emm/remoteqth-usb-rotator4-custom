@@ -63,3 +63,14 @@ The collector lost 420 of about 1500 events, all during the long full-speed move
 
 - `hamcam_live2.py` (hamcam v0.0.35): the same move with every sample checked: the overlap tag switched in the same
   telemetry sample as the azimuth crossed north, both ways; 0 wrong of 100 samples (v0.0.34: up to ~1 s late).
+
+## Firmware 1.7 full test (after the independent review)
+
+- `precision17.*`: all 8 landings on 120 report 120.0 from both sides. 117.7, 123.3, 114.2 and 120.0 report exactly;
+  125.6 reports 125.8; 120.5 from 120.0 stays. PD after the run: e791-793, y0 (no parity repairs needed), z0 (no
+  bursts), GE 0.
+- `live17.csv`: live position vs the edge timeline: mean 0.09, median 0.07, 90 % 0.12. Edge-only value: mean 0.29.
+  115/115 samples lie inside the bracketing edges.
+- `rampdown_check.py`: largest PWM drop while driven, over windows of at least 200 ms: 1.5 429 PWM/s, 1.7 266 PWM/s
+  (register 6 = 255 PWM/s; the log samples every 100 ms). This confirms review finding 1 and its fix on the real mast.
+- hamcam (`hamcam_live2.py`) through north: 0 wrong overlap samples out of 100; rests exact (10.0 / -10.0).

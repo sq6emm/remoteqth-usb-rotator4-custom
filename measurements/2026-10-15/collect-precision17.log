@@ -1,0 +1,222 @@
+    29.794 cmd         pos  target 120.0 pwm 0
+    29.794 start   cw  pos -10.0 target  pwm 0
+    29.824 run     cw  pos -10.0 target  pwm 0
+   (1.3 queries/s, 36 events, 0 lost)
+!! 2 events lost (read faster)
+!! 7 events lost (read faster)
+!! 5 events lost (read faster)
+!! 8 events lost (read faster)
+!! 5 events lost (read faster)
+!! 7 events lost (read faster)
+!! 2 events lost (read faster)
+!! 5 events lost (read faster)
+!! 5 events lost (read faster)
+!! 5 events lost (read faster)
+!! 4 events lost (read faster)
+   (1.1 queries/s, 108 events, 55 lost)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 1 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 4 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 4 events lost (read faster)
+!! 2 events lost (read faster)
+!! 7 events lost (read faster)
+!! 4 events lost (read faster)
+!! 7 events lost (read faster)
+   (1.3 queries/s, 186 events, 117 lost)
+!! 5 events lost (read faster)
+!! 5 events lost (read faster)
+!! 5 events lost (read faster)
+!! 2 events lost (read faster)
+!! 6 events lost (read faster)
+!! 7 events lost (read faster)
+    59.202 slow    cw  pos 116.0 target  pwm 253
+    60.025 cut     cw  pos 119.5 target  pwm 0
+    60.055 idle        pos 119.5 target  pwm 0
+   (1.3 queries/s, 265 events, 147 lost)
+    66.938 cmd         pos  target 110.0 pwm 0
+    66.938 start   ccw pos 120.0 target  pwm 0
+    66.968 run     ccw pos 120.0 target  pwm 0
+    69.575 slow    ccw pos 112.5 target  pwm 253
+    70.391 cut     ccw pos 110.0 target  pwm 0
+    70.421 idle        pos 110.0 target  pwm 0
+   (1.4 queries/s, 314 events, 147 lost)
+    77.591 cmd         pos  target 120.0 pwm 0
+    77.591 start   cw  pos 110.0 target  pwm 0
+    77.621 run     cw  pos 110.0 target  pwm 0
+    80.030 slow    cw  pos 116.0 target  pwm 253
+    80.824 cut     cw  pos 119.5 target  pwm 0
+    80.854 idle        pos 119.5 target  pwm 0
+   (1.4 queries/s, 361 events, 147 lost)
+    88.213 cmd         pos  target 130.0 pwm 0
+    88.214 start   cw  pos 120.0 target  pwm 0
+    88.244 run     cw  pos 120.0 target  pwm 0
+    90.665 slow    cw  pos 126.5 target  pwm 253
+    91.520 cut     cw  pos 129.5 target  pwm 0
+    91.550 idle        pos 129.5 target  pwm 0
+   (1.4 queries/s, 408 events, 147 lost)
+    98.819 cmd         pos  target 120.0 pwm 0
+    98.819 start   ccw pos 130.0 target  pwm 0
+    98.849 run     ccw pos 130.0 target  pwm 0
+   101.419 slow    ccw pos 123.0 target  pwm 253
+   102.369 cut     ccw pos 120.0 target  pwm 0
+   102.400 idle        pos 120.0 target  pwm 0
+   (1.4 queries/s, 458 events, 147 lost)
+   109.585 cmd         pos  target 110.0 pwm 0
+   109.585 start   ccw pos 119.5 target  pwm 0
+   109.615 run     ccw pos 119.5 target  pwm 0
+   112.238 slow    ccw pos 112.5 target  pwm 253
+   113.073 cut     ccw pos 110.0 target  pwm 0
+   113.103 idle        pos 110.0 target  pwm 0
+   (1.4 queries/s, 506 events, 147 lost)
+   120.382 cmd         pos  target 120.0 pwm 0
+   120.382 start   cw  pos 110.0 target  pwm 0
+   120.412 run     cw  pos 110.0 target  pwm 0
+   122.834 slow    cw  pos 116.5 target  pwm 253
+   123.619 cut     cw  pos 119.5 target  pwm 0
+   123.649 idle        pos 119.5 target  pwm 0
+   (1.4 queries/s, 554 events, 147 lost)
+   131.132 cmd         pos  target 130.0 pwm 0
+   131.132 start   cw  pos 120.0 target  pwm 0
+   131.162 run     cw  pos 120.0 target  pwm 0
+   133.570 slow    cw  pos 126.5 target  pwm 253
+   134.417 cut     cw  pos 129.5 target  pwm 0
+   134.447 idle        pos 129.5 target  pwm 0
+   (1.4 queries/s, 601 events, 147 lost)
+   141.849 cmd         pos  target 120.0 pwm 0
+   141.849 start   ccw pos 130.0 target  pwm 0
+   141.879 run     ccw pos 130.0 target  pwm 0
+   144.459 slow    ccw pos 123.0 target  pwm 253
+   145.421 cut     ccw pos 120.0 target  pwm 0
+   145.451 idle        pos 120.0 target  pwm 0
+   (1.4 queries/s, 651 events, 147 lost)
+   152.678 cmd         pos  target 110.0 pwm 0
+   152.678 start   ccw pos 119.5 target  pwm 0
+   152.708 run     ccw pos 119.5 target  pwm 0
+   155.330 slow    ccw pos 112.5 target  pwm 253
+   (1.4 queries/s, 697 events, 147 lost)
+   156.148 cut     ccw pos 110.0 target  pwm 0
+   156.178 idle        pos 110.0 target  pwm 0
+   163.460 cmd         pos  target 120.0 pwm 0
+   163.460 start   cw  pos 110.0 target  pwm 0
+   163.490 run     cw  pos 110.0 target  pwm 0
+   165.903 slow    cw  pos 116.5 target  pwm 253
+   (1.4 queries/s, 741 events, 147 lost)
+   166.692 cut     cw  pos 119.5 target  pwm 0
+   166.722 idle        pos 119.5 target  pwm 0
+   174.225 cmd         pos  target 130.0 pwm 0
+   174.225 start   cw  pos 120.0 target  pwm 0
+   174.255 run     cw  pos 120.0 target  pwm 0
+   176.669 slow    cw  pos 126.5 target  pwm 253
+   (1.4 queries/s, 784 events, 147 lost)
+   177.518 cut     cw  pos 129.5 target  pwm 0
+   177.548 idle        pos 129.5 target  pwm 0
+   184.943 cmd         pos  target 120.0 pwm 0
+   184.943 start   ccw pos 130.0 target  pwm 0
+   184.973 run     ccw pos 130.0 target  pwm 0
+   187.585 slow    ccw pos 123.0 target  pwm 253
+   (1.4 queries/s, 832 events, 147 lost)
+   188.502 cut     ccw pos 120.0 target  pwm 0
+   188.532 idle        pos 120.0 target  pwm 0
+   195.629 cmd         pos  target 120.5 pwm 0
+   (1.5 queries/s, 846 events, 147 lost)
+   203.483 cmd         pos  target 123.3 pwm 0
+   203.483 start   cw  pos 119.5 target  pwm 0
+   203.513 run     cw  pos 119.5 target  pwm 0
+   204.384 slow    cw  pos 120.5 target  pwm 109
+   205.193 cut     cw  pos 123.0 target  pwm 0
+   205.223 idle        pos 123.0 target  pwm 0
+   (1.4 queries/s, 870 events, 147 lost)
+   211.464 cmd         pos  target 117.7 pwm 0
+   211.465 start   ccw pos 123.0 target  pwm 0
+   211.495 run     ccw pos 123.0 target  pwm 0
+   213.042 slow    ccw pos 120.0 target  pwm 193
+   214.181 cut     ccw pos 117.0 target  pwm 0
+   214.211 idle        pos 117.0 target  pwm 0
+   (1.4 queries/s, 909 events, 147 lost)
+   222.167 cmd         pos  target 125.6 pwm 0
+   222.167 start   cw  pos 117.0 target  pwm 0
+   222.197 run     cw  pos 117.0 target  pwm 0
+   224.223 slow    cw  pos 122.0 target  pwm 253
+   224.942 cut     cw  pos 125.0 target  pwm 0
+   224.972 idle        pos 125.0 target  pwm 0
+   (1.4 queries/s, 952 events, 147 lost)
+   232.899 cmd         pos  target 114.2 pwm 0
+   232.899 start   ccw pos 125.5 target  pwm 0
+   232.929 run     ccw pos 125.5 target  pwm 0
+   235.827 slow    ccw pos 117.0 target  pwm 253
+   236.834 cut     ccw pos 114.0 target  pwm 0
+   236.864 idle        pos 114.0 target  pwm 0
+   (1.4 queries/s, 1004 events, 147 lost)
+   243.793 cmd         pos  target 120.0 pwm 0
+   243.793 start   cw  pos 114.0 target  pwm 0
+   243.823 run     cw  pos 114.0 target  pwm 0
+   245.285 slow    cw  pos 116.5 target  pwm 182
+   246.150 cut     cw  pos 119.5 target  pwm 0
+   246.184 idle        pos 119.5 target  pwm 0
+   (1.4 queries/s, 1039 events, 147 lost)
+   254.462 cmd         pos  target 165.0 pwm 0
+   254.462 start   cw  pos 120.0 target  pwm 0
+   254.492 run     cw  pos 120.0 target  pwm 0
+!! 1 events lost (read faster)
+   (1.6 queries/s, 1114 events, 148 lost)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+   264.460 stop    cw  pos 161.0 target  pwm 0
+   264.460 cut     cw  pos 161.0 target  pwm 0
+   264.491 idle        pos 161.0 target  pwm 0
+   273.195 cmd         pos  target -10.0 pwm 0
+   273.195 start   ccw pos 162.0 target  pwm 0
+   273.225 run     ccw pos 162.0 target  pwm 0
+   (1.3 queries/s, 1174 events, 159 lost)
+!! 6 events lost (read faster)
+!! 3 events lost (read faster)
+!! 6 events lost (read faster)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+   (1.3 queries/s, 1239 events, 185 lost)
+!! 7 events lost (read faster)
+!! 6 events lost (read faster)
+!! 6 events lost (read faster)
+!! 3 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 6 events lost (read faster)
+!! 6 events lost (read faster)
+!! 2 events lost (read faster)
+!! 7 events lost (read faster)
+!! 6 events lost (read faster)
+   (1.3 queries/s, 1304 events, 256 lost)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 3 events lost (read faster)
+!! 5 events lost (read faster)
+!! 6 events lost (read faster)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+!! 7 events lost (read faster)
+!! 6 events lost (read faster)
+!! 2 events lost (read faster)
+!! 6 events lost (read faster)
+   (1.3 queries/s, 1369 events, 324 lost)
+!! 6 events lost (read faster)
+!! 5 events lost (read faster)
+!! 9 events lost (read faster)
+!! 5 events lost (read faster)
+!! 9 events lost (read faster)
+!! 2 events lost (read faster)
+!! 9 events lost (read faster)
+!! 6 events lost (read faster)
+!! 8 events lost (read faster)
+!! 6 events lost (read faster)
+!! 8 events lost (read faster)
+   (1.1 queries/s, 1431 events, 397 lost)
+   312.935 slow    ccw pos -7.5 target  pwm 253

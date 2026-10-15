@@ -1,0 +1,26 @@
+   2.10 start -9.9 VESQ6EMM-rotor-1.7 PDa0,r0,c0,h0,s0,t0,p0,f490,e-,y0,z0
+  39.32 approach      -9.9 ->  120.0 CW : rest  120.0  (+0.0)  IP IP0
+  50.12 from below   120.0 ->  110.0 CCW: rest  110.1  (+0.1)  IP IP0
+  60.74 120 CW       110.1 ->  120.0 CW : rest  120.0  (+0.0)  IP IP0
+  71.35 from above   120.0 ->  130.0 CW : rest  130.0  (+0.0)  IP IP0
+  82.11 120 CCW      130.0 ->  120.0 CCW: rest  120.0  (+0.0)  IP IP8
+  92.91 from below   120.0 ->  110.0 CCW: rest  110.1  (+0.1)  IP IP0
+ 103.66 120 CW       110.1 ->  120.0 CW : rest  120.0  (+0.0)  IP IP0
+ 114.38 from above   120.0 ->  130.0 CW : rest  130.0  (+0.0)  IP IP0
+ 125.19 120 CCW      130.0 ->  120.0 CCW: rest  120.0  (+0.0)  IP IP8
+ 135.99 from below   120.0 ->  110.0 CCW: rest  110.1  (+0.1)  IP IP0
+ 146.74 120 CW       110.1 ->  120.0 CW : rest  120.0  (+0.0)  IP IP0
+ 157.47 from above   120.0 ->  130.0 CW : rest  130.0  (+0.0)  IP IP0
+ 168.11 120 CCW      130.0 ->  120.0 CCW: rest  120.0  (+0.0)  IP IP8
+ 175.97 fraction     120.0 ->  120.5 CW : rest  120.0  (-0.5)  IP IP8
+ 183.95 fraction     120.0 ->  123.3 CW : rest  123.3  (+0.0)  IP IP0
+ 194.65 fraction     123.3 ->  117.7 CCW: rest  117.7  (+0.0)  IP IP0
+ 205.39 fraction     117.7 ->  125.6 CW : rest  125.8  (+0.2)  IP IP8
+ 216.28 fraction     125.8 ->  114.2 CCW: rest  114.2  (+0.0)  IP IP0
+ 226.95 fraction     114.2 ->  120.0 CW : rest  120.0  (+0.0)  IP IP0
+ 238.89 S at 153.6 RPRT 0
+ 244.76 STOP from full speed: S near 153.6, rest 162.0
+ 245.62 PD PDa656,r0,c14,h0,s0,t0,p0,f490,e793,y0,z0
+ 293.77 home         162.0 ->  350.0 CW : rest   -9.9  (-359.9)  IP IP0
+
+120 from below: ['+0.0', '+0.0', '+0.0', '+0.0', '+0.0']  from above: ['+0.0', '+0.0', '+0.0']
