@@ -83,3 +83,6 @@ At rotator 122.0, Sky Tower and the CZK tower both stood 0.41 deg left of their 
 calibration frame, and compares with the reported position. Clockwise arrivals: -0.01, -0.01, -0.03 deg.
 Counter-clockwise: -0.21, -0.21, -0.12 deg (the antenna further CW than reported). The CCW landings coast less than
 the shared 65 ms model; the 1.3 motor log agrees (CCW coast < 0.06). This led to 1.8, register j.
+- 1.8 (`caltest18.py`, eight returns): clockwise arrivals -0.01, -0.01, -0.04, -0.03 deg; counter-clockwise -0.08, -0.08,
+  -0.08, -0.07 deg (1.7: up to -0.21). All eight within 0.08 deg (2-3 px), mean -0.05. The remaining ~0.05 deg CCW bias
+  cannot be fitted with j (it is already 0, coasting cannot be negative): most likely gear play. Calm day (wind < 1 m/s).
