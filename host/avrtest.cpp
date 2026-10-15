@@ -238,7 +238,7 @@ int main(int argc, char **argv) {
   std::string r = b.cmd("AZ", &lat);
   CHECK(r == "AZ91.0", "position taken over from K3NG: %s (reply %.1f ms after the command)", r.c_str(), lat);
   CHECK(lat >= 0 && lat < 50, "reply latency %.1f ms (Hamlib timeout 200 ms)", lat);
-  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.3", "VE: %s", b.cmd("VE").c_str());
+  CHECK(b.cmd("VE") == "VESQ6EMM-rotor-1.4", "VE: %s", b.cmd("VE").c_str());
   CHECK(b.cmd("GE") == "GE0", "no errors: %s", b.cmd("GE").c_str());
   CHECK(b.cmd("CR2") == "CR2,490", "PWM register: %s", b.cmd("CR2").c_str());
   CHECK(b.cmd("IP") == "IP8" || b.cmd("IP") == "IP0", "IP inputs (no button pressed): %s", b.cmd("IP").c_str());
@@ -388,8 +388,8 @@ int main(int argc, char **argv) {
     memcpy(&img[131], st, 21); img[131 + 21] = Bench::crc8(st, 21);
     uint8_t sl[5] = {685 & 0xFF, 685 >> 8, 7, 0, 0}; sl[4] = Bench::crc8(sl, 4);   // 685 counts = 342.5 deg
     memcpy(&img[256], sl, 5);
-    Bench o; o.boot(img, 342.5); o.run_ms(1000);
-    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRg") == "CRg,0.8" && o.cmd("CRh") == "CRh,200" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
+    Bench o; o.boot(img, 342.5); o.run_ms(9000);
+    CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRg") == "CRg,0.8" && o.cmd("CRh") == "CRh,225" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
           "settings kept (%s), new registers default (%s %s), image now version %d", o.cmd("CR5").c_str(), o.cmd("CRg").c_str(), o.cmd("CRh").c_str(), o.ee(130));
     CHECK(o.cmd("AR") == "AR342.5" && o.cmd("GE") == "GE0", "old slot 685 counts -> %s %s", o.cmd("AR").c_str(), o.cmd("GE").c_str());
     o.cmd("AZ346.0");
@@ -405,8 +405,11 @@ int main(int argc, char **argv) {
     img[128] = 'S'; img[129] = 'R'; img[130] = 2;
     memcpy(&img[131], st, 25); img[131 + 25] = Bench::crc8(st, 25);
     Bench o; o.boot(img, 10.0); o.run_ms(1000);
+    CHECK(o.ee(130) == 2, "1 s after boot the old image is untouched (version %d)", o.ee(130));
+    avr_reset(o.avr); o.reapply_inputs(); o.run_ms(1500);        // the DTR reset when avrdude closes the port
+    avr_reset(o.avr); o.reapply_inputs(); o.run_ms(9000);        // and again when rotctld opens it
     CHECK(o.cmd("CR5") == "CR5,3000" && o.cmd("CRh") == "CRh,180" && o.cmd("CRi") == "CRi,65" && o.ee(130) == 3,
-          "1.2 image: %s %s %s, version now %d", o.cmd("CR5").c_str(), o.cmd("CRh").c_str(), o.cmd("CRi").c_str(), o.ee(130));
+          "1.2 image after two early resets: %s %s %s, written as version %d after 8 s", o.cmd("CR5").c_str(), o.cmd("CRh").c_str(), o.cmd("CRi").c_str(), o.ee(130));
   }
 
   printf("== buttons held at power-up (short / water) never start a move\n");

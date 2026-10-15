@@ -3,7 +3,7 @@
 // motor-side reed pulses (1 pulse per degree, both edges counted = 0.5 deg).
 #pragma once
 
-#define FW_VERSION "SQ6EMM-rotor-1.3"
+#define FW_VERSION "SQ6EMM-rotor-1.4"
 
 // ---- pins (RemoteQTH 4.0.3, see docs/Rotator-Interface-4.0.3.pdf) ----
 #define PIN_PULSE      2    // PD2, PULSE-CCW line from the rotator (10k pull-up, 1k/100n/1k + BAV99); contact closed = low
@@ -83,7 +83,7 @@
 #define DEF_ENDPOINTS      1      // c: range ends enforced
 #define DEF_FAST_PWM       0      // e: allow PWM > 980 Hz (needs a gate driver + Schottky freewheel diode)
 #define DEF_EDGE_FRAC      8      // g: the reed contact opens 0.8 deg into each degree (measured 0.79 on 2026-10-15)
-#define DEF_COAST_MS     200      // h: coasting after a STOP / soft stop = speed x 200 ms (real STOP: 177..223 ms)
+#define DEF_COAST_MS     225      // h: coasting after a STOP / soft stop = speed x 225 ms (real STOPs: 177..273 ms)
 #define DEF_COAST_LAND_MS 65      // i: coasting after a landing cut = speed estimate x 65 ms (real landings: 52..75 ms)
 #define DEF_PARK           0      // f: park azimuth, 0.1 deg
 #define PWM_SAFE_MAX_HZ  980      // without register e

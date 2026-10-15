@@ -35,6 +35,9 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 #define SLOT_MOVING         1
 #define SLOT_TENTHS         2      // 1.2: the value is the position in tenths (before: 0.5 deg counts)
 #define MIRROR_EVERY_MS     600000UL   // the K3NG mirror is refreshed at most every 10 min (and after CW7)
+#define SETTINGS_BOOT_MS    8000UL     // converted / default settings are written only after this much uptime:
+                                       // avrdude closing the port and rotctld opening it reset the MCU (DTR) right
+                                       // after a flash and tore the first-boot write; until then the old image stays
 
 static uint8_t crc8(const uint8_t *p, uint8_t n) {
   uint8_t c = 0x5A;
@@ -61,7 +64,7 @@ static bool load_settings() {
   if (crc8(p, n) != EEPROM.read(EE_SET_ADDR + 3 + n)) return false;
   if (!settings_ok(t)) return false;              // a CRC8 can pass by chance: every field must be in range too
   rot.s = t;
-  if (ver != EE_SET_VERSION) save_settings();
+  if (ver != EE_SET_VERSION) rot.settings_dirty = true;   // written after SETTINGS_BOOT_MS
   return true;
 }
 
@@ -284,7 +287,7 @@ void setup() {
   pinMode(PIN_BTN_START, INPUT_PULLUP); pinMode(PIN_BTN_CCW, INPUT_PULLUP); pinMode(PIN_BTN_CW, INPUT_PULLUP);
 
   rot.defaults();
-  if (!load_settings()) { rot.defaults(); save_settings(); }
+  if (!load_settings()) { rot.defaults(); rot.settings_dirty = true; }   // written after SETTINGS_BOOT_MS
   delayMicroseconds(200);                         // pull-up settled: the contact level picks the stretch of the position
   rot.last_level = (PIND & _BV(PD2)) ? 1 : 0;
   uint8_t lp = load_position();
@@ -324,7 +327,7 @@ void loop() {
   rot.tick(now);
   if (rot.driving() && !ring_moving && !(rot.errors & ER_NOPOS)) slot_write(rot.pos(), SLOT_MOVING);
   if (rot.save_due(now, ring_moving)) save_position(now);
-  if (rot.settings_dirty) { save_settings(); rot.settings_dirty = false; }
+  if (rot.settings_dirty && now >= SETTINGS_BOOT_MS) { save_settings(); rot.settings_dirty = false; }
   static uint32_t t_lcd = 0;
   if (now - t_lcd >= 250) { t_lcd = now; display(); }
 }

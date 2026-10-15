@@ -26,7 +26,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 - **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
-## Precision (1.2, 1.3)
+## Precision (1.2 – 1.4)
 
 The SPID pulse contact gives two edges per degree, but not half a degree apart: it closes at the start of each degree
 and opens 0.79° later (measured on 2026-10-15: 182 ms closed, 48 ms open at full speed). Up to 1.1 every edge counted
@@ -77,7 +77,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.3`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.4`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
@@ -105,7 +105,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | e | Allow PWM above 980 Hz (needs hardware changes, see below) | 0 |
 | f | Park position, degrees | 0 |
 | g | Where the reed contact opens within a degree, degrees (0.1–0.9). Compare with `PD` field `e` (per mille). | 0.8 |
-| h | Coasting after a STOP or soft stop (steady speed): distance = speed × this, ms (0–1000). Real STOP from full speed: 177–223 ms | 200 |
+| h | Coasting after a STOP or soft stop (steady speed): distance = speed × this, ms (0–1000). Real STOPs from full speed: 177–273 ms | 225 |
 | i | Coasting after a landing cut (slowing down, so the speed estimate runs high): distance = speed estimate × this, ms. Real landings: 52–75 ms | 65 |
 
 ## PWM frequency and the hardware
@@ -206,6 +206,11 @@ Both simulators check the hardware rules:
 - no hard cut from high PWM except an explicit STOP.
 
 ## Flashing
+
+Settings converted from an older image, or defaults after an unreadable one, are written only 8 s after boot (1.4).
+Right after a flash, avrdude closing the port and rotctld opening it reset the MCU (DTR); 1.3 lost its first-boot
+settings write that way. A register value stored by an older version (e.g. `h` = 200 from 1.3) is kept. A new default
+only applies to a fresh image, or after `CW<r>,<value>`.
 
 Use the same procedure as for ver 6 (see `k3ng-remoteqth-custom/SQ6EMM-CHANGES.md` §6). Keep `SQ6EMM-k3ng-2020.08.26.02-ver6.hex` ready as the fallback. rotctld must change from `-m 603` to `-m 204`.
 
