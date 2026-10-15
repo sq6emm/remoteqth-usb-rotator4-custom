@@ -60,3 +60,6 @@ The collector lost 420 of about 1500 events, all during the long full-speed move
 - `hamcam_live.py`: 350 -> 10 -> 350 through north while polling hamcam's telemetry at 5 Hz. The azimuth moves
   smoothly (e.g. 351.0, 351.5, 352.6 ...), and both rests are exact (raw 10.0 / -10.0). The overlap tag lags up to ~1 s
   around north (telemetry asks w AR once a second).
+
+- `hamcam_live2.py` (hamcam v0.0.35): the same move with every sample checked: the overlap tag switched in the same
+  telemetry sample as the azimuth crossed north, both ways; 0 wrong of 100 samples (v0.0.34: up to ~1 s late).
