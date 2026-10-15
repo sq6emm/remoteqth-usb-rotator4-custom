@@ -11,7 +11,7 @@ void Rotor::defaults() {
   s.az_min = DEF_AZ_MIN;     s.az_max = DEF_AZ_MAX;
   s.ramp_up = DEF_RAMP_UP;   s.ramp_down = DEF_RAMP_DOWN; s.slow_zone = DEF_SLOW_ZONE;
   s.report_raw = DEF_REPORT_RAW; s.overshoot = DEF_OVERSHOOT; s.jam = DEF_JAM; s.endpoints = DEF_ENDPOINTS;
-  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK; s.edge_frac = DEF_EDGE_FRAC; s.coast_ms = DEF_COAST_MS; s.pos_off = 0; s.coast_land_ms = DEF_COAST_LAND_MS;
+  s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK; s.edge_frac = DEF_EDGE_FRAC; s.coast_ms = DEF_COAST_MS; s.pos_off = 0; s.coast_land_ms = DEF_COAST_LAND_MS; s.coast_land_ccw_ms = DEF_COAST_LAND_CCW_MS;
 }
 
 void Rotor::set_clamps() {
@@ -25,7 +25,7 @@ bool settings_ok(const Settings &s) {
          s.az_min >= -3600 && s.az_min <= 0 && s.az_max >= 3600 && s.az_max <= 7200 && s.az_max - s.az_min >= 3600 &&
          s.ramp_up >= 100 && s.ramp_up <= 10000 && s.ramp_down >= 100 && s.ramp_down <= 10000 && s.slow_zone <= 300 &&
          s.report_raw <= 1 && s.overshoot <= 1 && s.jam <= 1 && s.endpoints <= 1 && s.fast_pwm <= 1 &&
-         s.park >= s.az_min && s.park <= s.az_max && s.edge_frac >= 1 && s.edge_frac <= 9 && s.coast_ms <= 1000 && s.pos_off >= -5 && s.pos_off <= 4 && s.coast_land_ms <= 1000;
+         s.park >= s.az_min && s.park <= s.az_max && s.edge_frac >= 1 && s.edge_frac <= 9 && s.coast_ms <= 1000 && s.pos_off >= -5 && s.pos_off <= 4 && s.coast_land_ms <= 1000 && s.coast_land_ccw_ms <= 1000;
 }
 
 void Rotor::begin(uint32_t now) {
@@ -459,7 +459,8 @@ void Rotor::tick(uint32_t now) {
     uint8_t c = cap(), w = c;
     int16_t v = speed_tps(sn, now);               // known from the 2nd edge of the run: then the cut anticipates
     int16_t pe = pos_est(sn, mdir, v, now);       // the position between edges and the coasting after the cut
-    int16_t coast = (int16_t)((int32_t)v * s.coast_land_ms / 1000);   // a landing: slowing down, the estimate lags
+    uint16_t land_ms = mdir > 0 ? s.coast_land_ms : s.coast_land_ccw_ms;   // the motor coasts less counter-clockwise
+    int16_t coast = (int16_t)((int32_t)v * land_ms / 1000);   // a landing: slowing down, the estimate lags
     // no speed yet: stop where the coasting ends nearest - but not before the first edge (the motor has not even
     // started then; 'need' already decided that the move is worth it)
     int16_t close = v ? 0 : (sn.n ? tol(sn, mdir) + SHORT_COAST_T : -32000);
@@ -471,7 +472,7 @@ void Rotor::tick(uint32_t now) {
           set_state(S_SOFT, now);
           break;
         }
-        mark_cut(now, s.coast_land_ms);
+        mark_cut(now, land_ms);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;      // normal case: the slow-down left us at the floor PWM
         set_state(S_RELAY_OFF, now);
         break;
@@ -488,7 +489,7 @@ void Rotor::tick(uint32_t now) {
         log_ev(E_LIMIT, now);
         mode = M_NONE; want = false;
         if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) { set_state(S_SOFT, now); break; }
-        mark_cut(now, s.coast_land_ms);
+        mark_cut(now, land_ms);
         hw_pwm(0); pwm_now = 0; ramp_acc = 0;
         set_state(S_RELAY_OFF, now);
         break;
@@ -602,6 +603,7 @@ bool Rotor::reg_read(char r, char *out) const {
   case 'g': fmt_tenths(out, s.edge_frac); break;
   case 'h': fmt_u32(out, s.coast_ms); break;
   case 'i': fmt_u32(out, s.coast_land_ms); break;
+  case 'j': fmt_u32(out, s.coast_land_ccw_ms); break;
   default: return false;
   }
   return true;
@@ -609,7 +611,7 @@ bool Rotor::reg_read(char r, char *out) const {
 
 bool Rotor::reg_write(char r, const char *val) {
   bool ok; int32_t v = 0; int16_t t = 0;
-  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c' || r == 'g' || r == 'h' || r == 'i')) return false;   // range / position only at rest
+  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c' || r == 'g' || r == 'h' || r == 'i' || r == 'j')) return false;   // range / position only at rest
   bool angle = (r == '3' || r == '4' || r == '7' || r == '8' || r == 'f' || r == 'g');
   if (angle) { t = parse_tenths(val, &ok); if (!ok) return false; }
   else if (!parse_int(val, &v)) return false;
@@ -641,6 +643,7 @@ bool Rotor::reg_write(char r, const char *val) {
   case 'g': if (t < 1 || t > 9) return false; s.edge_frac = t; set_raw(pos()); break;
   case 'h': if (v < 0 || v > 1000) return false; s.coast_ms = v; break;
   case 'i': if (v < 0 || v > 1000) return false; s.coast_land_ms = v; break;
+  case 'j': if (v < 0 || v > 1000) return false; s.coast_land_ccw_ms = v; break;
   default: return false;
   }
   settings_dirty = true;

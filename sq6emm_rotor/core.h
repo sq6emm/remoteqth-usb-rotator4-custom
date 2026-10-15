@@ -26,7 +26,8 @@ struct Settings {             // register
   uint8_t  edge_frac;         // g (tenths): where the contact opens within a degree (1.2)
   uint16_t coast_ms;          // h (ms): coasting after the cut = speed x this (1.2)
   int8_t   pos_off;           // tenths, -5..4: where the edge grid sits within a degree, set by CW7 (1.2)
-  uint16_t coast_land_ms;     // i (ms): coasting after a landing cut = the speed estimate x this (1.2; new fields last)
+  uint16_t coast_land_ms;     // i (ms): coasting after a clockwise landing cut = the speed estimate x this (1.3)
+  uint16_t coast_land_ccw_ms; // j (ms): the same for counter-clockwise landings (1.8; new fields go last)
 };
 
 // GS status bits (Easycomm III)

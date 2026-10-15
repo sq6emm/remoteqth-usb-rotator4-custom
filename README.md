@@ -98,7 +98,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
 | `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
-| `VE` | Version → `VESQ6EMM-rotor-1.7`. |
+| `VE` | Version → `VESQ6EMM-rotor-1.8`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
@@ -127,7 +127,8 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | f | Park position, degrees | 0 |
 | g | Where the reed contact opens within a degree, degrees (0.1–0.9). Compare with `PD` field `e` (per mille). | 0.8 |
 | h | Coasting after a STOP or soft stop (steady speed): distance = speed × this, ms (0–1000). Real STOPs from full speed: 177–273 ms | 225 |
-| i | Coasting after a landing cut (slowing down, so the speed estimate runs high): distance = speed estimate × this, ms. Real landings: 52–75 ms | 65 |
+| i | Coasting after a landing cut (slowing down, so the speed estimate runs high): distance = speed estimate × this, ms. Real landings: 52–75 ms. Clockwise only since 1.8 | 65 |
+| j | The same for counter-clockwise landings (1.8). The Sky Tower test measured optically that the antenna stood 0.12–0.21° further clockwise than reported with 65 ms: the motor coasts less counter-clockwise (and/or gear play). Fitted to calm conditions | 0 |
 
 ## PWM frequency and the hardware
 

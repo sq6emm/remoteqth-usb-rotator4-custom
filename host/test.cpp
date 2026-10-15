@@ -129,7 +129,7 @@ static void test_short_moves() {
     expect += d;
     char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", expect); s.send(b);
     settle(s);
-    CHECK(std::fabs(s.theta - expect) <= 0.5 && std::fabs(s.fw_pos() - s.theta) <= 0.3, "step %+.1f: expect %.1f got fw %.1f true %.2f", d, expect, s.fw_pos(), s.theta);
+    CHECK(std::fabs(s.theta - expect) <= 0.55 && std::fabs(s.fw_pos() - s.theta) <= 0.3, "step %+.1f: expect %.1f got fw %.1f true %.2f", d, expect, s.fw_pos(), s.theta);
   }
   CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
 }

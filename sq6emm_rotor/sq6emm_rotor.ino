@@ -28,7 +28,7 @@ LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 #define EE_SET_ADDR         128
 #define EE_SET_MAGIC0       'S'
 #define EE_SET_MAGIC1       'R'
-#define EE_SET_VERSION      3      // 2: + edge_frac, coast_ms, pos_off; 3: + coast_land_ms. Older images are taken over
+#define EE_SET_VERSION      4      // 2: + edge_frac, coast_ms, pos_off; 3: + coast_land_ms; 4: + coast_land_ccw_ms
 #define EE_RING_ADDR        256
 #define EE_RING_SLOTS       128
 #define EE_SLOT             5      // pos lo, pos hi, seq, flags, crc
@@ -59,7 +59,8 @@ static bool load_settings() {
   uint8_t ver = EEPROM.read(EE_SET_ADDR + 2);
   if (EEPROM.read(EE_SET_ADDR) != EE_SET_MAGIC0 || EEPROM.read(EE_SET_ADDR + 1) != EE_SET_MAGIC1 ||
       ver < 1 || ver > EE_SET_VERSION) return false;
-  uint8_t n = ver == 1 ? offsetof(Settings, edge_frac) : ver == 2 ? offsetof(Settings, coast_land_ms) : sizeof(Settings);
+  uint8_t n = ver == 1 ? offsetof(Settings, edge_frac) : ver == 2 ? offsetof(Settings, coast_land_ms)
+            : ver == 3 ? offsetof(Settings, coast_land_ccw_ms) : sizeof(Settings);
   Settings t = rot.s;                            // defaults (set before): fields a version 1 image lacks keep them
   uint8_t *p = (uint8_t *)&t;
   for (uint8_t i = 0; i < n; i++) p[i] = EEPROM.read(EE_SET_ADDR + 3 + i);

@@ -74,3 +74,12 @@ The collector lost 420 of about 1500 events, all during the long full-speed move
 - `rampdown_check.py`: largest PWM drop while driven, over windows of at least 200 ms: 1.5 429 PWM/s, 1.7 266 PWM/s
   (register 6 = 255 PWM/s; the log samples every 100 ms). This confirms review finding 1 and its fix on the real mast.
 - hamcam (`hamcam_live2.py`) through north: 0 wrong overlap samples out of 100; rests exact (10.0 / -10.0).
+
+## Sky Tower recalibration and optical check (firmware 1.7)
+
+At rotator 122.0, Sky Tower and the CZK tower both stood 0.41 deg left of their hamcam markers (clean RTSP frame,
+34.9 px/deg). Recalibrated with `CW7,122.4`; afterwards both markers sit on their objects within 0.05 deg.
+`caltest.py` makes six excursions and returns to 122.4, finds the tower by sub-pixel template match against the
+calibration frame, and compares with the reported position. Clockwise arrivals: -0.01, -0.01, -0.03 deg.
+Counter-clockwise: -0.21, -0.21, -0.12 deg (the antenna further CW than reported). The CCW landings coast less than
+the shared 65 ms model; the 1.3 motor log agrees (CCW coast < 0.06). This led to 1.8, register j.

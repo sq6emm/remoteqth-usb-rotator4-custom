@@ -24,7 +24,7 @@ struct Sim {
   double theta = 0, omega = 0;        // true antenna azimuth (deg, continuous) and speed (deg/s)
   int8_t relay = 0; uint8_t pwm = 0; bool brake = false; uint16_t hz = 490;
   bool jam = false;
-  double u_start = 0.24, tau = 0.10, tau_coast = 0.5, fric = 6.0;   // coasting: inertia + worm friction, fitted to the real log   // speed per PWM: motor.h (measured)
+  double u_start = 0.24, tau = 0.10, tau_coast = 0.5, fric = 6.0, fric_ccw = 70.0;   // coasting: inertia + worm friction, fitted to the real log   // speed per PWM: motor.h (measured)
   // contact
   double duty = 0.79;                  // measured 2026-10-15: 182 ms closed / 48 ms open at full speed
   double chatter_prob = 0.0;           // probability of chatter after a real edge
@@ -72,7 +72,7 @@ struct Sim {
       double target = relay * motor_speed(pwm);
       omega += (target - omega) * dt / tau;
     } else {
-      double dec = omega / tau_coast + (omega > 0 ? fric : -fric);   // 4.6 deg/s -> 0.9 deg, 2 deg/s -> 0.23 deg
+      double dec = omega / tau_coast + (omega > 0 ? fric : -fric_ccw);   // CW: 4.6 deg/s -> 0.9, 2 -> 0.23; CCW much less (real)
       double nw = omega - dec * dt;
       omega = (nw > 0) != (omega > 0) || std::fabs(nw) < 0.02 ? 0 : nw;
     }
