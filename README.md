@@ -104,7 +104,7 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `RESET` | Stop and clear the errors (Hamlib `R`). |
 | `PARK` | Go to the park position (register f). |
 | `AR` | SQ6EMM extension: raw position, for example `AR375.5` (which turn). |
-| `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>,e<contact closed share, per mille>` (`e-` until enough steady pulses were seen). |
+| `PD` | SQ6EMM extension: diagnostics, `PDa<accepted>,r<rejected>,c<coasting>,h<reversal holds>,s<stalls>,t<timeouts>,p<pwm>,f<Hz>,e<contact closed share, per mille>` (`e-` until enough steady pulses were seen), `y<parity repairs>` (a missed edge was healed), `z<bursts>` (edge pairs closer than 20 ms undone as interference). |
 | `LG`, `LG<seq>` | SQ6EMM extension: event log. `LG` gives `LG<next seq>@<ms>:`. `LG<seq>` returns up to 6 records from seq: `LG<first>@<ms>:t,c,p,k;…` (see below), only whole records and never more than 118 characters, because rotctld cuts raw replies at 127. A `+` at the end means more records may be waiting. |
 
 ### Registers
