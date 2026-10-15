@@ -34,8 +34,11 @@
 #define QUIET_MAX_MS       2000   // no edge for max(QUIET_MS, 2 x the last edge intervals), at most QUIET_MAX_MS,
 #define COAST_MIN_MS        500   // and at least COAST_MIN_MS after the motor current was switched off
 #define STALL_ARM_MS       3000   // stall guard armed after this long ...
-#define STALL_NO_PULSE_MS  1500   // ... then: driven but no pulse for this long = jam
-#define MOVE_TIMEOUT_MS  150000UL // a single move never takes longer (420 deg at ~4.4 deg/s is ~100 s)
+#define STALL_NO_PULSE_MS  1500   // ... then: driven but no pulse for this long = jam (at PWM 253; scaled up
+#define STALL_MAX_MS       8000   //     as 253 / PWM for slow speeds, at most STALL_MAX_MS)
+#define MOVE_TIMEOUT_MS  150000UL // a goto never runs longer than this after its last command (420 deg ~ 100 s)
+#define MANUAL_TIMEOUT_MS 900000UL // manual runs (ML/MR/VL/VR/buttons) may be slow
+#define SOFT_CUT_MARGIN      24   // reaching a target / range end above floor + this PWM: soft stop instead of a cut
 #define BRAKE_HOLD_MS      3000   // brake released (RL3 / START LED) until this long after the motor stopped
 #define SAVE_AFTER_MS      1000   // position saved to EEPROM this long after the last pulse while idle
 #define TOLERANCE_T           4   // stop when the remaining distance is <= 0.4 deg (counts are 0.5 deg)

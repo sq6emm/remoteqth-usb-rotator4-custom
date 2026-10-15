@@ -4,7 +4,7 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
 
 - **Controller:** RemoteQTH Rotator Interface 4.0.3 (ATmega328P at 16 MHz, Optiboot).
 - **Rotator:** SPID RAU. Reed pulses come from the motor side, 1 pulse per degree. Both edges are counted, so the resolution is 0.5°.
-- **Size:** about 16 kB of flash and 1.5 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 350 bytes to spare (measured in simavr).
+- **Size:** about 17.4 kB of flash and 1.55 kB of RAM (including the 512-byte event log), against 27 kB for the K3NG-based ver 6. The stack has at least 350 bytes to spare (measured in simavr).
 
 ## What it does
 
@@ -14,13 +14,16 @@ Firmware written from scratch for the SQ6EMM azimuth rotator controller. It spea
   - At the target, the last 3° slow down from PWM 200 to the floor of 64.
   - The ends of the range slow down over their last 5°.
   - Button release, a reversal and the end of `ML`/`MR` ramp down over 1 s.
-- **Explicit STOP (`SA`)** cuts the motor current at once. This is the only hard stop.
+- **Explicit STOP (`SA`)** cuts the motor current at once. This is the only hard stop, apart from the stall guard (nothing is turning then). If a new target lands on the current position while running fast, the motor soft-stops and comes back.
 - **Relays never switch under current:** PWM is 0 for 30 ms before and after a relay change. The opposite direction is energised only after the coasting has ended.
 - **Pulse input:**
   - It is sampled at 2 kHz by a timer interrupt, and a level counts after 3 ms of stability. EMI spikes and reed chatter cannot count.
   - Pulses with the motor off are coasting in the last direction (the slew drive cannot be back-driven), so they are counted that way.
-- **Stall guard:** if the motor is driven but no pulse arrives for 1.5 s (armed after 3 s), it stops with a jam error. There is also a 150 s move timeout.
-- **Position storage:** the position is saved to EEPROM 1 s after the last pulse. The watchdog (2 s) drops the relays and PWM if the loop ever hangs.
+- **Stall guard:** if the motor is driven but no pulse arrives for 1.5 s at full PWM, it stops with a jam error. The limit is armed after 3 s and is scaled by 253/PWM up to 8 s, because at slow speed the contact stays closed longer.
+- **Timeouts:** a goto stops 150 s after its last command; manual runs stop after 15 min.
+- **Commands during a move:** a manual command (`ML`/`MR`/`VL`/`VR`/button) against the current direction soft-stops first, waits for the coasting to end, then reverses. The range ends keep working.
+- **Position storage:** a "move in progress" record is written when the motor starts, and the position is saved 1 s after the last pulse. A reset during a move (FT232 DTR, watchdog, brown-out) comes back with `GE` 64, "Pos uncertain". The watchdog (2 s) drops the relays and PWM if the loop ever hangs.
+- **Never moves by itself:** nothing starts after power-up or a reset, and a button held or shorted at power-up is ignored until it has been released once.
 - **Display:** the LCD shows the azimuth, an overlap marker, target, speed, errors and the preset. The CW, CCW and START buttons work as before, and so does the preset encoder (its knob is defective, see the ver 6 notes).
 
 ## Easycomm III
@@ -34,11 +37,11 @@ Commands are separated by space, CR or LF. A `;` is ignored, because Hamlib send
 | `EL`, `EL<x>` | Returns `EL0.0`; setting it is ignored (azimuth-only rotator). |
 | `SA` (`SE`) | STOP: immediate. `SE` is ignored. |
 | `ML`, `MR` | Run CCW / CW to the range end, until a stop command. |
-| `VL<v>`, `VR<v>` | Run CCW / CW at v mdeg/s, 0–9900, mapped onto the floor…MaxSpeed PWM. `0` is a soft stop. This is what Hamlib `M 8/16 <speed>` sends. |
+| `VL<v>`, `VR<v>` | Run CCW / CW at v mdeg/s, 0–9900, mapped onto the floor…MaxSpeed PWM. `0` is the slowest speed (Hamlib speed 1). This is what Hamlib `M 8/16 <speed>` sends; it is stopped with `SA` (Hamlib `S`). |
 | `GS` | Status: 1 idle, 2 moving, 4 pointing (idle on target), 8 error. |
-| `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range. A good move clears 2/8/32. `RESET` clears all. |
+| `GE` | Errors: 1 pulse-line chatter, 2 jam/stall, 8 timeout, 16 no stored position, 32 target out of range, 64 position uncertain (reset during a move). A good move clears 2/8/32. `RESET` clears 1/2/8/32. Only `CW7` clears 16 and 64. |
 | `CR<r>` / `CR <r>` | Read register → `CR<r>,<value>`. |
-| `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. |
+| `CW<r>,<v>` | Write a register (stored in EEPROM). Invalid values are ignored. Registers 3, 4, 7 and c are refused while the rotator moves. |
 | `VE` | Version → `VESQ6EMM-rotor-1.0`. |
 | `IP` | Inputs: bit 1 CW button, 2 CCW, 4 START, 8 pulse line level. |
 | `AN` | Raw ADC of encoder channels A6,A2. |
@@ -94,39 +97,15 @@ D11 is OC2A, so only the Timer2 prescaler steps exist. The other timer's pins (D
 
 ## EEPROM and moving from the K3NG firmware
 
-The firmware's own data lives at byte 128 (settings, with CRC) and byte 192 (position, with CRC). The K3NG data in bytes 0…~80 is left alone.
+The firmware's own data:
+- **Byte 128:** settings, with magic, version and CRC. Every field is range-checked on load; anything out of range gives the defaults.
+- **Bytes 256…895:** a ring of 128 position slots (count, sequence, flags, CRC). Each save writes the next slot, which spreads the wear: about 6 million moves before the 100k-cycle rating of any cell. A brown-out during a write leaves the previous slot valid. A slot flagged "moving" is written when the motor starts; finding it as the newest slot at power-up gives `GE` 64.
 
-- **First start after K3NG ver 6:** the position is taken over from K3NG's `last_azimuth` at byte 9 (float). No recalibration is needed.
-- **Every save** also writes K3NG's `last_azimuth`. Flashing ver 6 back therefore still finds the right position. Ver 6 only knows 0..360, and its counter stops at −15/375, so flash it back only while the rotator is inside 0..360.
-- **No stored position:** the start position is 0 with `GE` bit 16. Calibrate with `CW7,<deg>`.
+The K3NG data in bytes 0…66 is left alone, except as described below.
 
-## Event log (motor characterisation)
-
-A 64-entry ring buffer in RAM records the following, each with a millisecond timestamp, the position and the PWM:
-- every accepted pulse edge (level, and whether it came while coasting);
-- a sample every 100 ms while the motor is driven, if nothing else was logged;
-- each state change: command (with target), relay on, ramp start, slow-down entered, soft stop, cut, relay off, explicit STOP, stall, timeout, range end, coasting hold.
-
-Record fields `t,c,p,k`:
-- `t`: milliseconds since power-up.
-- `c`: position in 0.5° counts. For a command record it is the target in 0.1°.
-- `p`: PWM.
-- `k`: `type | dir << 4 | level << 6 | coast << 7`. Types: 1 edge, 2 start, 3 run, 4 slow, 5 soft, 6 cut, 7 idle, 8 sample, 9 stop, 10 stall, 11 timeout, 12 range end, 13 hold, 14 command. Direction: 1 CW, 2 CCW.
-
-`host/rotorlog.py` collects the log into a CSV and analyses it. It **only reads**; it never moves the rotator.
-
-```
-python3 host/rotorlog.py collect --rotctld 192.168.14.199:4533 -o run1.csv   # through rotctld's raw 'w', hamcam keeps running
-python3 host/rotorlog.py collect --serial /dev/rotator -o run1.csv           # direct (rotctld stopped; opening the port resets the MCU)
-python3 host/rotorlog.py analyse run1.csv
-```
-
-The analysis gives, per move:
-- the time from the ramp start to the first pulse, and the PWM at that moment (break-away);
-- the top speed;
-- the coasting distance and time after the cut or STOP.
-
-It also builds a speed-versus-PWM table from full-degree periods at steady PWM, which avoids the 77/23 % contact duty asymmetry. Through rotctld the collector manages about 2.7 queries/s × 6 records, which keeps up with a full-speed move (about 12 events/s) with margin. Tested: `host/log_test.sh`.
+- **First start after K3NG ver 6:** the position is taken over from K3NG's `last_azimuth` at byte 9 (float; offset verified with avr-gcc). No recalibration is needed.
+- **The K3NG mirror:** `last_azimuth` is refreshed at most every 10 minutes, and right after a `CW7`. Flashing ver 6 back therefore finds the position, but it can be up to 10 min old. Before flashing back, send `CW7,<current position>` and wait 2 s. Ver 6 only knows 0..360, and its counter stops at −15/375, so flash it back only while the rotator is inside 0..360.
+- **No stored position:** the start position is 0 with `GE` bit 16, and nothing is saved until you calibrate with `CW7,<deg>`.
 
 ## Hamlib
 
@@ -170,7 +149,12 @@ The AVR-level test (`host/avrtest.cpp`) covers what the host simulator cannot:
 - the LCD contents (HD44780 model);
 - EEPROM: takeover from a K3NG image, the position block and the K3NG mirror;
 - the watchdog being enabled;
-- stack depth: at least 350 bytes never used.
+- stack depth: at least 350 bytes never used;
+- a reset during a move (`GE64`, nothing moves by itself);
+- a torn position write (the previous slot is used);
+- a settings image with a valid CRC but impossible values (defaults);
+- buttons held at power-up;
+- a long `LG` reply during a move (non-blocking serial output).
 
 Both simulators check the hardware rules:
 - no relay switching under current;

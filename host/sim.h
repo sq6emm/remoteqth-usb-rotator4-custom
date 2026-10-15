@@ -35,7 +35,8 @@ struct Sim {
   int violations = 0; std::string last_violation;
   int max_up_step = 0; uint8_t last_pwm = 0; uint64_t last_pwm_us = 0;
   bool allow_hard_cut = false;         // set around explicit STOP
-  uint64_t hard_cut_until = 0;         // an "SA" (explicit STOP) was received just now
+  uint64_t hard_cut_until = 0;
+  bool dir_mismatch = false;         // an "SA" (explicit STOP) was received just now
   std::string rxline;
   std::mt19937 rng{12345};
   double rnd() { return std::uniform_real_distribution<double>(0, 1)(rng); }
@@ -95,7 +96,8 @@ struct Sim {
       uint32_t now = ms();                 // like loop(): 'now' is taken first, pulses arrive while the pass runs
       for (int k = 0; k < 20; k++) step(50);
       rot.tick(now);
-      if (rot.save_due(now)) rot.saved();
+      if (relay && rot.dir() != relay) { if (!dir_mismatch) violate("core direction differs from the energised relay"); dir_mismatch = true; }
+      if (rot.save_due(now, false)) rot.saved(rot.cnt_copy());
     }
   }
   template <class F> bool run_until(F cond, uint32_t max_ms) {

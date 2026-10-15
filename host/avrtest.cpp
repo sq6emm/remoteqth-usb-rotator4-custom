@@ -37,7 +37,7 @@ struct Bench {
   // rule checks
   int violations = 0; std::string last_violation;
   uint16_t sp_min = 0xFFFF;
-  int resets = 0;
+  int resets = 0; uint16_t last_sp = 0;
   uint8_t last_pd2 = 2;
 
   static double ms_of(uint64_t c) { return c / 16000.0; }
@@ -125,6 +125,13 @@ struct Bench {
     avr_raise_irq(avr_io_getirq(avr, AVR_IOCTL_IOPORT_GETIRQ(port), pin), level);
   }
   uint8_t ext_mask[3] = {0, 0, 0}, ext_val[3] = {0, 0, 0};
+  void reapply_inputs() {
+    for (char port : {'C', 'D'}) for (int pin = 0; pin < 8; pin++)
+      if (ext_mask[port - 'B'] & (1 << pin)) {     // toggle: simavr skips raising an IRQ to its cached value
+        int v = (ext_val[port - 'B'] >> pin) & 1;
+        drive(port, pin, !v); drive(port, pin, v);
+      }
+  }
   void set_pd2() {
     uint8_t c = contact();
     if (c != last_pd2) { drive('D', 2, c); last_pd2 = c; }
@@ -158,7 +165,8 @@ struct Bench {
       if (st == cpu_Done || st == cpu_Crashed) { printf("CPU stopped (%d) at %.1f ms\n", st, now_ms()); exit(3); }
       uint16_t sp = avr->data[R_SPL] | (avr->data[R_SPH] << 8);
       if (sp < sp_min && avr->cycle > 16000) sp_min = sp;
-      if (avr->pc == 0 && avr->cycle > 1000) resets++;
+      if (sp == 0x8FF && last_sp < 0x8F0) resets++;   // the C startup code sets SP = RAMEND: a (re)boot
+      last_sp = sp;
       if (avr->cycle >= next_phys) { physics(); next_phys += 800; }
     }
   }
@@ -181,6 +189,22 @@ struct Bench {
   double fw_raw() { std::string r = cmd("AR"); return r.size() > 2 ? atof(r.c_str() + 2) : -999; }
   bool idle() { return cmd("GS") == "GS5" || cmd("GS") == "GS1"; }
   std::string lcd_line(int row) { std::string s((const char *)lcd.vram + (row ? 0x40 : 0), 16); for (auto &c : s) if (c == (char)0xDF) c = '*'; return s; }
+  // newest valid position slot of the EEPROM ring (256.., 128 x 5 bytes): returns the count, *flags
+  int ring_newest(int *flags) {
+    int best = -1; uint8_t bseq = 0; int bc = 0;
+    for (int i = 0; i < 128; i++) {
+      uint8_t b[5]; for (int k = 0; k < 5; k++) b[k] = ee(256 + i * 5 + k);
+      if (b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF) continue;
+      if (crc8(b, 4) != b[4]) continue;
+      if (best < 0 || (int8_t)(b[2] - bseq) > 0) { best = i; bseq = b[2]; bc = (int16_t)(b[0] | (b[1] << 8)); *flags = b[3]; }
+    }
+    return best < 0 ? -9999 : bc;
+  }
+  static uint8_t crc8(const uint8_t *p, int n) {
+    uint8_t c = 0x5A;
+    while (n--) { c ^= *p++; for (int i = 0; i < 8; i++) c = (c & 0x80) ? (c << 1) ^ 0x07 : c << 1; }
+    return c;
+  }
   uint8_t ee(int addr) { avr_eeprom_desc_t d; d.offset = 0; d.size = 0; d.ee = nullptr; avr_ioctl(avr, AVR_IOCTL_EEPROM_GET, &d); return d.ee[addr]; }
   double pwm_hz(double window_ms) { run_ms(window_ms); return pwm_on() ? reg_hz() : 0; }
 };
@@ -221,8 +245,8 @@ int main() {
   printf("  true %.2f fw %.1f, LCD '%s' / '%s'\n", b.theta, b.fw_az(), b.lcd_line(0).c_str(), b.lcd_line(1).c_str());
   CHECK(std::fabs(b.fw_az() - 120.0) <= 0.5 && std::fabs(b.theta - 120.0) < 1.0, "arrived: fw %.1f true %.2f", b.fw_az(), b.theta);
   CHECK(b.lcd_line(0).find("120.0") != std::string::npos && b.lcd_line(1).find("On target") == 0, "LCD shows the position and 'On target'");
-  int16_t pos_cnt = (int16_t)(b.ee(192) | (b.ee(193) << 8)); float mirror; uint8_t m[4] = {b.ee(9), b.ee(10), b.ee(11), b.ee(12)}; memcpy(&mirror, m, 4);
-  CHECK(pos_cnt == 240 && mirror == 120.0f, "EEPROM: position block %d counts, K3NG mirror %.1f", pos_cnt, mirror);
+  int fl = -1; int pos_cnt = b.ring_newest(&fl); float mirror; uint8_t m[4] = {b.ee(9), b.ee(10), b.ee(11), b.ee(12)}; memcpy(&mirror, m, 4);
+  CHECK(pos_cnt == 240 && fl == 0 && mirror == 120.0f, "EEPROM: newest ring slot %d counts (flags %d), K3NG mirror %.1f", pos_cnt, fl, mirror);
   b.run_ms(2000);
   CHECK(b.brake == 0, "brake engaged again after the hold time");
 
@@ -244,8 +268,34 @@ int main() {
   CHECK(std::fabs(b.fw_raw() + 10.0) <= 0.5, "AR %.1f (true %.2f)", b.fw_raw(), b.theta);
   CHECK(b.lcd_line(0).find("<ovl") != std::string::npos, "LCD overlap marker: '%s'", b.lcd_line(0).c_str());
 
+  printf("== LG reply (long, non-blocking output) during a move\n");
+  b.cmd("AZ200"); b.run_ms(3000);
+  double lg_lat; std::string lg = b.cmd("LG0", &lg_lat);
+  int recs = 0; for (char c : lg) recs += c == ';';
+  CHECK(lg.rfind("LG", 0) == 0 && recs == 6, "LG0 during a move: %d records, %zu chars, complete %.0f ms after the command", recs, lg.size(), lg_lat);
+  b.run_until([&] { return b.idle(); }, 60000); b.run_ms(1500);
+  CHECK(std::fabs(b.fw_az() - 200.0) <= 0.5 && std::fabs(b.theta - 200.0) < 1.0, "move with an LG poll ends on target: fw %.1f true %.2f", b.fw_az(), b.theta);
+
+  printf("== reset (DTR / watchdog / brown-out) during a move\n");
+  b.cmd("AZ230"); b.run_ms(4000);
+  int fl2 = -1; int during = b.ring_newest(&fl2);
+  CHECK(fl2 == 1 && during == 400, "MOVING slot written at the start: %d counts, flags %d", during, fl2);
+  double true_at_reset = b.theta;
+  avr_reset(b.avr);
+  b.reapply_inputs();                                // simavr clears the external pin levels on reset
+  b.run_ms(1200);
+  printf("  reset at true %.2f, after reboot AZ %s GE %s LCD '%s'\n", true_at_reset, b.cmd("AZ").c_str(), b.cmd("GE").c_str(), b.lcd_line(1).c_str());
+  CHECK(b.cmd("GE") == "GE64", "reboot after a reset during a move -> GE64 (position uncertain): %s", b.cmd("GE").c_str());
+  CHECK(b.lcd_line(1).find("Pos uncertain") == 0, "LCD: '%s'", b.lcd_line(1).c_str());
+  CHECK(!b.relay_cw && !b.relay_ccw && !b.pwm_on(), "nothing moves by itself after the reset");
+  b.cmd("RESET");
+  CHECK(b.cmd("GE") == "GE64", "RESET does not clear the position warning");
+  char cal[32]; snprintf(cal, sizeof cal, "CW7,%.1f", std::round(b.theta * 2) / 2); b.cmd(cal);
+  CHECK(b.cmd("GE") == "GE0", "CW7 clears it");
+  b.run_ms(1500);
+
   printf("== STOP during a move\n");
-  b.cmd("AZ60");
+  b.cmd("AZ300");
   b.run_ms(6000);
   CHECK(b.relay_cw == 1, "moving CW");
   avr_raise_irq(avr_io_getirq(b.avr, AVR_IOCTL_UART_GETIRQ('0'), UART_IRQ_INPUT), 'S'); b.run_ms(1.05);
@@ -271,7 +321,7 @@ int main() {
 
   printf("== totals\n");
   CHECK(b.violations == 0, "hardware rules: %d violations %s", b.violations, b.last_violation.c_str());
-  CHECK(b.resets == 0, "no resets (watchdog / crash): %d", b.resets);
+  CHECK(b.resets == 2, "boots: %d (power-up + the deliberate reset; a watchdog or crash reset would add more)", b.resets);
   int ram_end = 0x8FF, free_min = b.sp_min - 0x100 - 1506 + 1;   // SRAM 0x100..0x8FF, .data+.bss = 1506 bytes
   printf("  lowest SP 0x%03X -> at least %d bytes never touched between the variables and the stack\n", b.sp_min, free_min);
   CHECK(free_min > 200, "stack margin %d bytes", free_min);
@@ -284,6 +334,47 @@ int main() {
   CHECK(e.lcd_line(1).find("No position") == 0, "LCD: '%s'", e.lcd_line(1).c_str());
   e.cmd("CW7,200.5");
   CHECK(e.cmd("AZ") == "AZ200.5" && e.cmd("GE") == "GE0", "CW7 calibrates and clears the error");
+
+  printf("== brown-out during a position save: newest slot corrupt -> the previous slot\n");
+  {
+    std::vector<uint8_t> img = k3ng_eeprom(50.0f);
+    auto slot = [&](int i, int cnt, uint8_t seq, uint8_t flags, bool corrupt) {
+      uint8_t s5[5] = {(uint8_t)cnt, (uint8_t)(cnt >> 8), seq, flags, 0}; s5[4] = Bench::crc8(s5, 4) ^ (corrupt ? 0x55 : 0);
+      memcpy(&img[256 + i * 5], s5, 5);
+    };
+    slot(0, 200, 7, 1, false);                        // MOVING marker at 100.0
+    slot(1, 260, 8, 0, false);                        // saved after the move: 130.0
+    slot(2, 300, 9, 1, true);                         // next move started, write torn
+    Bench c; c.boot(img, 130.0); c.run_ms(1000);
+    CHECK(c.cmd("AZ") == "AZ130.0" && c.cmd("GE") == "GE0", "slot 1 used: %s %s", c.cmd("AZ").c_str(), c.cmd("GE").c_str());
+    slot(1, 260, 8, 0, true);                         // and if the end-of-move save is the torn one
+    Bench d; d.boot(img, 100.0); d.run_ms(1000);
+    CHECK(d.cmd("AZ") == "AZ100.0" && d.cmd("GE") == "GE64", "torn end-of-move save -> MOVING slot -> uncertain: %s %s", d.cmd("AZ").c_str(), d.cmd("GE").c_str());
+  }
+
+  printf("== settings image with a valid CRC but impossible values -> defaults\n");
+  {
+    std::vector<uint8_t> img = k3ng_eeprom(10.0f);
+    // Settings (AVR, packed): pwm_max u8, pwm_floor u8, pwm_freq u16, az_min i16, az_max i16, ramp_up u16, ramp_down u16,
+    // slow_zone u16, report_raw, overshoot, jam, endpoints, fast_pwm (u8 each), park i16
+    uint8_t st[22] = {253, 64, 0xEA, 0x01, 0xD4, 0xFE, 0x3C, 0x0F, 0, 0, 0xE8, 0x03, 30, 0, 0, 0, 1, 1, 0, 0, 0};
+    img[128] = 'S'; img[129] = 'R'; img[130] = 1;
+    memcpy(&img[131], st, 21); img[131 + 21] = Bench::crc8(st, 21);
+    Bench e2; e2.boot(img, 10.0); e2.run_ms(1000);
+    CHECK(e2.cmd("CR5") == "CR5,2000", "ramp_up 0 rejected, defaults used: %s", e2.cmd("CR5").c_str());
+  }
+
+  printf("== buttons held at power-up (short / water) never start a move\n");
+  {
+    Bench h; h.boot(k3ng_eeprom(150.0f), 150.0);
+    h.button(5, 0); h.button(4, 0);                    // CW and CCW held from the start
+    h.run_ms(3000);
+    CHECK(!h.relay_cw && !h.relay_ccw && h.cmd("GS") == "GS1", "held at power-up: no move (GS %s)", h.cmd("GS").c_str());
+    h.button(4, 1); h.button(5, 1); h.run_ms(200);      // released once ...
+    h.button(5, 0); h.run_ms(500);                      // ... then a real press works
+    CHECK(h.relay_cw == 1, "press after release moves CW");
+    h.button(5, 1); h.run_ms(3000);
+  }
 
   printf("\n%d checks, %d failed\n", checks, fails);
   return fails ? 1 : 0;

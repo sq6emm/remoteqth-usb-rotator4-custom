@@ -14,8 +14,24 @@ void Rotor::defaults() {
   s.fast_pwm = DEF_FAST_PWM; s.park = DEF_PARK;
 }
 
+void Rotor::set_clamps() {
+  int16_t lo_c = t2c(s.az_min - POS_MARGIN_T), hi_c = t2c(s.az_max + POS_MARGIN_T);
+  ATOMIC_BEGIN clamp_lo = lo_c; clamp_hi = hi_c; ATOMIC_END
+}
+
+bool settings_ok(const Settings &s) {
+  return s.pwm_max >= 1 && s.pwm_floor <= s.pwm_max && s.pwm_freq >= 30 && s.pwm_freq <= 62500 &&
+         (s.pwm_freq <= PWM_SAFE_MAX_HZ || s.fast_pwm == 1) &&
+         s.az_min >= -3600 && s.az_min <= 0 && s.az_max >= 3600 && s.az_max <= 7200 && s.az_max - s.az_min >= 3600 &&
+         s.ramp_up >= 100 && s.ramp_up <= 10000 && s.ramp_down >= 100 && s.ramp_down <= 10000 && s.slow_zone <= 300 &&
+         s.report_raw <= 1 && s.overshoot <= 1 && s.jam <= 1 && s.endpoints <= 1 && s.fast_pwm <= 1 &&
+         s.park >= s.az_min && s.park <= s.az_max;
+}
+
 void Rotor::begin(uint32_t now) {
   hw_pwm(0); hw_relay(0); hw_brake(false);
+  if (!settings_ok(s)) defaults();
+  set_clamps();
   if (s.pwm_freq > PWM_SAFE_MAX_HZ && !s.fast_pwm) s.pwm_freq = DEF_PWM_FREQ;
   pwm_hz = hw_pwm_freq(s.pwm_freq);
   t_tick = t_idle = rej_window_ms = now;
@@ -40,8 +56,8 @@ void Rotor::sample(uint8_t level, uint32_t now_ms) {
   int8_t d = drive_dir;
   uint8_t coast = 0;
   if (!d) { d = last_dir; n_coast++; coast = 1; }
-  if (d > 0) { if (cnt < t2c(s.az_max + POS_MARGIN_T)) cnt++; }
-  else if (d < 0) { if (cnt > t2c(s.az_min - POS_MARGIN_T)) cnt--; }
+  if (d > 0) { if (cnt < clamp_hi) cnt++; }
+  else if (d < 0) { if (cnt > clamp_lo) cnt--; }
   log_isr(E_EDGE, now_ms, cnt, (level << 6) | (coast << 7));
 }
 
@@ -105,7 +121,7 @@ uint8_t Rotor::status() const {
 // ---------------------------------------------------------------- commands
 bool Rotor::goto_raw(int16_t t) {
   if (s.endpoints && (t < lo() || t > hi())) { errors |= ER_LIMIT; return false; }
-  tgt = t; mode = M_TARGET; want = true; corrected = false;
+  tgt = t; mode = M_TARGET; want = true; corrected = false; t_cmd = t_tick;
   errors &= ~(ER_JAM | ER_TIMEOUT | ER_LIMIT);
   log_ev(E_CMD, t_tick, t);
   return true;
@@ -124,18 +140,18 @@ bool Rotor::goto_az(int16_t t) {
 }
 
 void Rotor::manual(int8_t d) {
-  mode = M_MANUAL; mdir = d; want = true;
+  mode = M_MANUAL; man_dir = d; want = true; t_cmd = t_tick;   // mdir changes only when the relays do
   errors &= ~(ER_JAM | ER_TIMEOUT | ER_LIMIT);
   log_ev(E_CMD, t_tick, d > 0 ? s.az_max : s.az_min);
 }
 
 void Rotor::soft_stop() {
-  want = false; mode = M_NONE;
+  want = false; mode = M_NONE; holding = false;
   if (st == S_RUN || st == S_RELAY_ON) set_state(S_SOFT, t_tick);
 }
 
 void Rotor::stop_now() {
-  want = false; mode = M_NONE;
+  want = false; mode = M_NONE; holding = false;
   hw_pwm(0); pwm_now = 0; ramp_acc = 0;
   log_ev(E_STOP, t_tick);
   if (st != S_IDLE && st != S_RELAY_OFF) set_state(S_RELAY_OFF, t_tick);
@@ -154,7 +170,8 @@ void Rotor::set_position(int16_t t) {
   }
   int16_t c = t2c(t);
   ATOMIC_BEGIN cnt = c; ATOMIC_END
-  errors &= ~ER_NOPOS;
+  errors &= ~(ER_NOPOS | ER_UNCERT);
+  calibrated_now = true;
   if (mode == M_TARGET && st == S_IDLE) mode = M_NONE;   // the old target no longer means anything
 }
 
@@ -187,10 +204,10 @@ static uint8_t slow_pwm(int16_t d, int16_t z, uint8_t c, uint8_t floor) {
   return floor + (uint8_t)((uint32_t)(top - floor) * (uint32_t)d / (uint32_t)z);
 }
 
-bool Rotor::save_due(uint32_t now) const {
-  if (st != S_IDLE) return false;
+bool Rotor::save_due(uint32_t now, bool force) const {
+  if (st != S_IDLE || (errors & ER_NOPOS)) return false;   // an unknown position is never stored as if it were valid
   if ((now - last_edge(now)) < SAVE_AFTER_MS) return false;
-  return !has_saved || cnt_copy() != saved_cnt;
+  return force || !has_saved || cnt_copy() != saved_cnt || calibrated_now;
 }
 
 // ---------------------------------------------------------------- motion state machine
@@ -220,8 +237,8 @@ void Rotor::tick(uint32_t now) {
       int16_t diff = tgt - p;
       need = iabs16(diff) <= TOLERANCE_T ? 0 : (diff > 0 ? 1 : -1);
     } else if (mode == M_MANUAL) {
-      int16_t dl = mdir > 0 ? hi() - p : p - lo();
-      need = (s.endpoints && dl <= TOLERANCE_T) ? 0 : mdir;
+      int16_t dl = man_dir > 0 ? hi() - p : p - lo();
+      need = (s.endpoints && dl <= TOLERANCE_T) ? 0 : man_dir;
     }
   }
 
@@ -251,18 +268,21 @@ void Rotor::tick(uint32_t now) {
     break;
 
   case S_RELAY_ON:                                 // relay contacts settle without current
-    if (now - t_state >= RELAY_SETTLE_MS) { set_state(S_RUN, now); t_move = now; }
+    if (now - t_state >= RELAY_SETTLE_MS) { set_state(S_RUN, now); t_move = now; t_cmd = now; }
     break;
 
   case S_RUN: {
-    uint32_t since_pulse = now - (le > t_move ? le : t_move);
-    if (s.jam && (now - t_move) > STALL_ARM_MS && since_pulse > STALL_NO_PULSE_MS) {
+    uint32_t since_pulse = (int32_t)(le - t_move) > 0 ? now - le : now - t_move;
+    uint32_t stall_ms = (uint32_t)STALL_NO_PULSE_MS * 253 / (pwm_now > 32 ? pwm_now : 32);   // slow = longer gaps
+    if (stall_ms > STALL_MAX_MS) stall_ms = STALL_MAX_MS;
+    if (stall_ms < STALL_NO_PULSE_MS) stall_ms = STALL_NO_PULSE_MS;
+    if (s.jam && (now - t_move) > STALL_ARM_MS && since_pulse > stall_ms) {
       errors |= ER_JAM; n_stalls++;
       log_ev(E_STALL, now);
       stop_now();                                  // nothing turns, so there is nothing to ramp down
       break;
     }
-    if ((now - t_move) > MOVE_TIMEOUT_MS) {
+    if ((now - t_cmd) > (mode == M_MANUAL ? MANUAL_TIMEOUT_MS : MOVE_TIMEOUT_MS)) {
       errors |= ER_TIMEOUT; n_timeouts++;
       log_ev(E_TIMEOUT, now);
       soft_stop();
@@ -270,14 +290,20 @@ void Rotor::tick(uint32_t now) {
     }
     if (want) {
       if (need == mdir) want = false;              // same direction: just follow the new target (tracking)
-      else if (need == 0) want = false;            // new target is right here: the target check below stops
+      else if (need == 0 && mode == M_TARGET) want = false;   // target right here: the target check below stops
+      else if (need == 0) { mode = M_NONE; want = false; set_state(S_SOFT, now); break; }  // manual, that end reached
       else { set_state(S_SOFT, now); break; }      // reversal: soft stop first, IDLE starts the other way
     }
     uint8_t c = cap(), w = c;
     if (mode == M_TARGET) {
       int16_t d = (tgt - p) * mdir;               // remaining distance in the direction of travel
-      if (d <= TOLERANCE_T) {                      // reached (or passed): the slow-down left us at the floor PWM
-        hw_pwm(0); pwm_now = 0; ramp_acc = 0;
+      if (d <= TOLERANCE_T) {                      // reached (or passed)
+        if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) {   // still fast (target moved onto us): soft stop,
+          want = true;                                             // then come back once the coasting is over
+          set_state(S_SOFT, now);
+          break;
+        }
+        hw_pwm(0); pwm_now = 0; ramp_acc = 0;      // normal case: the slow-down left us at the floor PWM
         set_state(S_RELAY_OFF, now);
         break;
       }
@@ -290,7 +316,9 @@ void Rotor::tick(uint32_t now) {
       int16_t dl = dist_to_limit();
       if (dl <= TOLERANCE_T) {
         log_ev(E_LIMIT, now);
-        hw_pwm(0); pwm_now = 0; ramp_acc = 0; mode = M_NONE;
+        mode = M_NONE; want = false;
+        if (pwm_now > (uint16_t)s.pwm_floor + SOFT_CUT_MARGIN) { set_state(S_SOFT, now); break; }
+        hw_pwm(0); pwm_now = 0; ramp_acc = 0;
         set_state(S_RELAY_OFF, now);
         break;
       }
@@ -402,6 +430,7 @@ bool Rotor::reg_read(char r, char *out) const {
 
 bool Rotor::reg_write(char r, const char *val) {
   bool ok; int32_t v = 0; int16_t t = 0;
+  if (moving() && (r == '3' || r == '4' || r == '7' || r == 'c')) return false;   // range / position only at rest
   bool angle = (r == '3' || r == '4' || r == '7' || r == '8' || r == 'f');
   if (angle) { t = parse_tenths(val, &ok); if (!ok) return false; }
   else if (!parse_int(val, &v)) return false;
@@ -414,8 +443,8 @@ bool Rotor::reg_write(char r, const char *val) {
     if (v > PWM_SAFE_MAX_HZ && !s.fast_pwm) return false;     // Q4 has no gate driver, D2 is a slow 1N4007
     s.pwm_freq = v; pwm_hz = hw_pwm_freq(s.pwm_freq);
     break;
-  case '3': if (t < -3600 || t > 0 || s.az_max - t < 3600) return false; s.az_min = t; break;
-  case '4': if (t < 3600 || t > 7200 || t - s.az_min < 3600) return false; s.az_max = t; break;
+  case '3': if (t < -3600 || t > 0 || s.az_max - t < 3600 || s.park < t) return false; s.az_min = t; set_clamps(); break;
+  case '4': if (t < 3600 || t > 7200 || t - s.az_min < 3600 || s.park > t) return false; s.az_max = t; set_clamps(); break;
   case '5': if (v < 100 || v > 10000) return false; s.ramp_up = v; break;
   case '6': if (v < 100 || v > 10000) return false; s.ramp_down = v; break;
   case '7': if (t < s.az_min - POS_MARGIN_T || t > s.az_max + POS_MARGIN_T) return false; set_position(t); return true;

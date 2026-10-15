@@ -75,10 +75,10 @@ void Proto::cmd(const char *t, const char *next, bool *used_next, uint32_t now) 
     if (!*q) return;
     while (*q >= '0' && *q <= '9' && v < 100000UL) v = v * 10 + (*q++ - '0');
     if (*q) return;
-    if (v == 0) { rot.soft_stop(); return; }
-    if (v > 9900) v = 9900;
+    if (v > 9900) v = 9900;                       // 0 = the slowest speed (Hamlib speed 1), stop is SA
     uint8_t f = rot.s.pwm_floor, m = rot.s.pwm_max;
-    rot.set_speed(f + (uint8_t)((uint32_t)(m - f) * (uint32_t)v / 9900UL));
+    uint8_t sp = f + (uint8_t)((uint32_t)(m - f) * (uint32_t)v / 9900UL);
+    rot.set_speed(sp ? sp : 1);
     rot.manual(t[1] == 'R' ? 1 : -1);
     return;
   }

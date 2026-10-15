@@ -15,16 +15,24 @@ Enc enc;
 LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 // ---------------------------------------------------------------- EEPROM
-// K3NG data (bytes 0..~80) is left alone, except last_azimuth which is mirrored so that the previous firmware
-// still knows the position if it is ever flashed back. Own data: settings at 128, position at 192.
+// K3NG data (bytes 0..66) is left alone, except last_azimuth (float at byte 9, verified with avr-gcc), mirrored so the
+// previous firmware still finds the position if it is ever flashed back. Own data: settings at 128 (magic, version,
+// CRC, validated on load) and a ring of position slots at 256..895: every save writes the next slot with a sequence
+// number, so a brown-out during a write leaves the previous slot valid and the wear is spread over 128 slots.
+// A slot with the MOVING flag is written when the motor starts; the slot after the move clears it. Finding MOVING in
+// the newest slot at power-up means a reset during a move: the position may be off (GE 64).
 #define EE_K3NG_MAGIC_ADDR  0
 #define EE_K3NG_MAGIC       111
-#define EE_K3NG_LAST_AZ     9      // struct config_t: magic(1) + 4 x int(2) -> float last_azimuth
+#define EE_K3NG_LAST_AZ     9
 #define EE_SET_ADDR         128
-#define EE_POS_ADDR         192
 #define EE_SET_MAGIC0       'S'
 #define EE_SET_MAGIC1       'R'
 #define EE_SET_VERSION      1
+#define EE_RING_ADDR        256
+#define EE_RING_SLOTS       128
+#define EE_SLOT             5      // cnt lo, cnt hi, seq, flags, crc
+#define SLOT_MOVING         1
+#define MIRROR_EVERY_MS     600000UL   // the K3NG mirror is refreshed at most every 10 min (and after CW7)
 
 static uint8_t crc8(const uint8_t *p, uint8_t n) {
   uint8_t c = 0x5A;
@@ -46,26 +54,60 @@ static bool load_settings() {
   Settings t; uint8_t *p = (uint8_t *)&t;
   for (uint8_t i = 0; i < sizeof(Settings); i++) p[i] = EEPROM.read(EE_SET_ADDR + 3 + i);
   if (crc8(p, sizeof(Settings)) != EEPROM.read(EE_SET_ADDR + 3 + sizeof(Settings))) return false;
+  if (!settings_ok(t)) return false;              // a CRC8 can pass by chance: every field must be in range too
   rot.s = t;
   return true;
 }
 
-static void save_position() {
-  int16_t c = rot.cnt_copy();
-  uint8_t b[2] = {(uint8_t)c, (uint8_t)(c >> 8)};
-  EEPROM.update(EE_POS_ADDR, b[0]); EEPROM.update(EE_POS_ADDR + 1, b[1]); EEPROM.update(EE_POS_ADDR + 2, crc8(b, 2));
-  if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC) { float f = c * 0.5f; EEPROM.put(EE_K3NG_LAST_AZ, f); }
-  rot.saved();
+static uint8_t ring_next = 0, ring_seq = 0;       // where the next slot goes, its sequence number
+static bool ring_moving = false;                  // the newest slot has the MOVING flag
+static uint32_t t_mirror = 0; static bool mirror_done = false;
+
+static bool slot_read(uint8_t i, int16_t *c, uint8_t *seq, uint8_t *flags) {
+  uint8_t b[EE_SLOT];
+  for (uint8_t k = 0; k < EE_SLOT; k++) b[k] = EEPROM.read(EE_RING_ADDR + i * EE_SLOT + k);
+  if (b[0] == 0xFF && b[1] == 0xFF && b[2] == 0xFF && b[3] == 0xFF) return false;   // blank
+  if (crc8(b, 4) != b[4]) return false;
+  *c = (int16_t)(b[0] | (b[1] << 8)); *seq = b[2]; *flags = b[3];
+  return true;
 }
 
-static bool load_position() {
-  uint8_t b[2] = {EEPROM.read(EE_POS_ADDR), EEPROM.read(EE_POS_ADDR + 1)};
-  if (crc8(b, 2) == EEPROM.read(EE_POS_ADDR + 2)) { rot.cnt = (int16_t)(b[0] | (b[1] << 8)); return true; }
+static void slot_write(int16_t c, uint8_t flags) {
+  uint8_t b[EE_SLOT] = {(uint8_t)c, (uint8_t)(c >> 8), ring_seq, flags, 0};
+  b[4] = crc8(b, 4);
+  for (uint8_t k = 0; k < EE_SLOT; k++) EEPROM.update(EE_RING_ADDR + ring_next * EE_SLOT + k, b[k]);
+  ring_next = (ring_next + 1) % EE_RING_SLOTS; ring_seq++;
+  ring_moving = flags & SLOT_MOVING;
+}
+
+static void save_position(uint32_t now) {
+  int16_t c = rot.cnt_copy();
+  slot_write(c, 0);
+  rot.saved(c);
+  if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC && (!mirror_done || rot.calibrated_now || now - t_mirror >= MIRROR_EVERY_MS)) {
+    float f = c * 0.5f; EEPROM.put(EE_K3NG_LAST_AZ, f);
+    t_mirror = now; mirror_done = true;
+  }
+  rot.calibrated_now = false;
+}
+
+// 0 = no position, 1 = position (newest slot), 2 = position but a reset happened during a move, 3 = taken over from K3NG
+static uint8_t load_position() {
+  bool any = false; uint8_t best = 0, bseq = 0, bflags = 0; int16_t bc = 0;
+  for (uint8_t i = 0; i < EE_RING_SLOTS; i++) {
+    int16_t c; uint8_t seq, flags;
+    if (!slot_read(i, &c, &seq, &flags)) continue;
+    if (!any || (int8_t)(seq - bseq) > 0) { any = true; best = i; bseq = seq; bflags = flags; bc = c; }
+  }
+  if (any) {
+    rot.cnt = bc; ring_next = (best + 1) % EE_RING_SLOTS; ring_seq = bseq + 1; ring_moving = bflags & SLOT_MOVING;
+    return ring_moving ? 2 : 1;
+  }
   if (EEPROM.read(EE_K3NG_MAGIC_ADDR) == EE_K3NG_MAGIC) {          // first start after the K3NG firmware
     float f; EEPROM.get(EE_K3NG_LAST_AZ, f);
-    if (f == f && f > -45.0f && f < 405.0f) { rot.cnt = (int16_t)(f >= 0 ? f * 2 + 0.5f : f * 2 - 0.5f); return true; }
+    if (f == f && f > -45.0f && f < 405.0f) { rot.cnt = (int16_t)(f >= 0 ? f * 2 + 0.5f : f * 2 - 0.5f); return 3; }
   }
-  return false;
+  return 0;
 }
 
 // ---------------------------------------------------------------- outputs
@@ -148,14 +190,17 @@ static const char *diag_analog() {
 }
 
 // ---------------------------------------------------------------- buttons, preset, display
+// A button held (or shorted) at power-up never starts a move: it must be seen released once first.
 struct Button {
-  uint8_t pin, state, raw; uint32_t t;
-  explicit Button(uint8_t p) : pin(p), state(0), raw(0), t(0) {}
+  uint8_t pin, state, raw, armed; uint32_t t;
+  explicit Button(uint8_t p) : pin(p), state(1), raw(1), armed(0), t(0) {}
   int8_t update(uint32_t now) {                    // +1 pressed, -1 released, 0 nothing
     uint8_t r = digitalRead(pin) == LOW;
     if (r != raw) { raw = r; t = now; }
-    if (r != state && now - t >= 30) { state = r; return r ? 1 : -1; }
-    return 0;
+    if (r == state || now - t < 30) return 0;
+    state = r;
+    if (!r) { if (!armed) { armed = 1; return 0; } return -1; }
+    return armed ? 1 : 0;
   }
 };
 static Button b_cw(PIN_BTN_CW), b_ccw(PIN_BTN_CCW), b_start(PIN_BTN_START);
@@ -212,9 +257,11 @@ static void display() {
   else if (e & ER_TIMEOUT) strcpy(b, "ERR timeout");
   else if (e & ER_SENSOR) strcpy(b, "ERR pulse line");
   else if (e & ER_NOPOS) strcpy(b, "No position!");
+  else if ((e & ER_UNCERT) && !rot.moving()) strcpy(b, "Pos uncertain");
   else if (rot.moving()) {
     p = b; *p++ = rot.dir() > 0 ? '>' : '<'; *p++ = rot.dir() > 0 ? '>' : '<'; *p++ = ' ';
-    p = fmt_tenths(p, rot.target()); *p++ = ' ';
+    if (rot.manual_mode()) { strcpy(p, "manual"); p += 6; } else p = fmt_tenths(p, rot.target());
+    *p++ = ' ';
     p = fmt_u32(p, (uint32_t)rot.pwm_now * 100 / 255); *p++ = '%'; *p = 0;
   } else strcpy(b, (rot.status() & ST_POINTING) ? "On target" : "Idle");
   lcd_line(1, b);
@@ -230,8 +277,10 @@ void setup() {
   pinMode(PIN_BTN_START, INPUT_PULLUP); pinMode(PIN_BTN_CCW, INPUT_PULLUP); pinMode(PIN_BTN_CW, INPUT_PULLUP);
 
   rot.defaults();
-  if (!load_settings()) save_settings();
-  if (!load_position()) { rot.cnt = 0; rot.errors |= ER_NOPOS; }
+  if (!load_settings()) { rot.defaults(); save_settings(); }
+  uint8_t lp = load_position();
+  if (lp == 0) { rot.cnt = 0; rot.errors |= ER_NOPOS; }
+  else if (lp == 2) rot.errors |= ER_UNCERT;
 
   Serial.begin(SERIAL_BAUD);
   proto.diag_inputs = diag_inputs;
@@ -240,26 +289,32 @@ void setup() {
   lcd.begin(16, 2);
   lcd.setCursor(0, 0); lcd.print("SQ6EMM rotor");
   lcd.setCursor(0, 1); lcd.print(FW_VERSION + 7);   // "rotor-1.0"
-  delay(1200);
+  delay(600);
   lcd.clear();
 
   rot.last_level = (PIND & _BV(PD2)) ? 1 : 0;
+  rot.begin(millis());                            // counter limits are set before the sampling interrupt runs
   pulse_timer_start();
   adc_start();
-  rot.begin(millis());
   wdt_enable(WDTO_2S);                            // a hung loop resets the MCU: relays and PWM drop to off
 }
 
 void loop() {
   wdt_reset();
   uint32_t now = millis();
-  while (Serial.available()) {
-    const char *r = proto.feed((char)Serial.read(), now);
-    if (r) Serial.print(r);
+  // non-blocking replies: an LG reply (~180 chars) would block ~120 ms in Serial.print with the 64-byte TX buffer.
+  // While a reply is going out, input waits in the RX buffer (Hamlib waits for the reply anyway).
+  static const char *tx = nullptr;
+  if (tx) {
+    int n = Serial.availableForWrite();
+    while (n-- > 0 && *tx) Serial.write(*tx++);
+    if (!*tx) tx = nullptr;
   }
+  while (!tx && Serial.available()) tx = proto.feed((char)Serial.read(), now);
   buttons(now);
   rot.tick(now);
-  if (rot.save_due(now)) save_position();
+  if (rot.driving() && !ring_moving && !(rot.errors & ER_NOPOS)) slot_write(rot.cnt_copy(), SLOT_MOVING);
+  if (rot.save_due(now, ring_moving)) save_position(now);
   if (rot.settings_dirty) { save_settings(); rot.settings_dirty = false; }
   static uint32_t t_lcd = 0;
   if (now - t_lcd >= 250) { t_lcd = now; display(); }

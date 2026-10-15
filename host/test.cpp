@@ -116,8 +116,8 @@ static void test_stop_and_manual() {
   CHECK(m.violations == 0, "violations %d (%s)", m.violations, m.last_violation.c_str());
   m.send("VR5000\n"); m.run(3000);
   CHECK(m.rot.moving() && m.rot.dir() > 0, "VR5000 moves CW");
-  m.send("VR0\n"); settle(m);
-  CHECK(!m.rot.moving(), "VR0 stops");
+  m.allow_hard_cut = true; m.send("SA SE \n"); settle(m); m.allow_hard_cut = false;   // Hamlib S during M
+  CHECK(!m.rot.moving(), "SA stops a VR run");
   CHECK(m.violations == 0, "violations %d (%s)", m.violations, m.last_violation.c_str());
 }
 
@@ -294,6 +294,54 @@ static void test_log() {
   CHECK(s2.send("LG" + std::to_string(n2) + "\n").find(':') + 3 == s2.send("LG" + std::to_string(n2) + "\n").size(), "caught up: no records");
 }
 
+static void test_review() {
+  printf("review findings: opposite manual command during a move, targets at the current position, low speed, long tracking\n");
+  for (const char *c : {"ML\n", "VL4900\n"}) {
+    Sim s(91.0);
+    s.send("AZ200\n");
+    s.run_until([&] { return s.theta >= 120; }, 60000);
+    s.send(c);
+    s.run_until([&] { return !s.rot.moving() && s.omega == 0; }, 160000);
+    s.run(1000);
+    printf("  AZ200 then %.*s at 120: end true %.2f fw %.1f\n", 6, c, s.theta, s.fw_pos());
+    CHECK(s.fw_pos() >= -30.5 && s.fw_pos() <= -29.0 && std::fabs(s.fw_pos() - s.theta) < 0.9, "%.*s during a CW goto reverses and stops at -30 (true %.2f fw %.1f)", 2, c, s.theta, s.fw_pos());
+    CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
+  }
+  {
+    Sim s(91.0);
+    s.send("AZ200\n");
+    s.run_until([&] { return s.theta >= 150; }, 60000);
+    s.send("AZ150.2\n");                               // a target right here while running at full PWM
+    settle(s);
+    printf("  AZ150.2 at full speed: end true %.2f fw %.1f\n", s.theta, s.fw_pos());
+    CHECK(s.violations == 0, "no hard cut: violations %d (%s)", s.violations, s.last_violation.c_str());
+    CHECK(std::fabs(s.fw_pos() - 150.2) <= 0.5, "ends on 150.2 (fw %.1f)", s.fw_pos());
+  }
+  {
+    Sim s(91.0);
+    s.send("AZ200\n"); s.run(6000);
+    CHECK(s.send("CW7,10\n") == "" && std::fabs(s.fw_pos() - s.theta) < 0.9, "CW7 refused while moving (fw %.1f true %.2f)", s.fw_pos(), s.theta);
+    s.send("CW4,370\n"); CHECK(s.send("CR4\n") == "CR4,390.0\r\n", "CW4 refused while moving");
+    settle(s);
+    CHECK(s.violations == 0, "violations %d (%s)", s.violations, s.last_violation.c_str());
+  }
+  {
+    Sim s(100.0);
+    s.send("VR0100\n"); s.run(30000);                  // Hamlib M 16 2: slowest speeds
+    printf("  VR0100 30 s: moved %.2f deg, pwm %d, errors %d\n", s.theta - 100, s.pwm, s.rot.errors);
+    CHECK(!(s.rot.errors & ER_JAM) && s.rot.moving(), "slow manual run: no false jam (err %d)", s.rot.errors);
+    s.send("VR0000\n"); s.run(3000);
+    CHECK(s.rot.moving(), "VR0000 = slowest speed (Hamlib M 16 1), not stop");
+    s.allow_hard_cut = true; s.send("SA\n"); settle(s);
+  }
+  {
+    Sim s(10.0);                                        // 200 s of tracking with the target always ahead
+    double tgt = 12;
+    for (int i = 0; i < 100; i++) { char b[32]; snprintf(b, sizeof b, "AZ%.1f\n", tgt); s.send(b); s.run(2000); tgt += 9.0; if (tgt > 350) break; }
+    CHECK(!(s.rot.errors & ER_TIMEOUT), "continuous tracking does not hit the move timeout (err %d)", s.rot.errors);
+  }
+}
+
 int main() {
   test_protocol();
   test_log();
@@ -308,6 +356,7 @@ int main() {
   test_settings_limits();
   test_full_range();
   test_endurance();
+  test_review();
   printf("\n%d checks, %d failed\n", checks, fails);
   return fails ? 1 : 0;
 }

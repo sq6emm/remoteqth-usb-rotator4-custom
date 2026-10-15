@@ -35,6 +35,7 @@ struct Settings {             // register
 #define ER_TIMEOUT  8     // move took longer than MOVE_TIMEOUT_MS
 #define ER_NOPOS   16     // no stored position at power-up (set it with CW7)
 #define ER_LIMIT   32     // a target outside the range was refused
+#define ER_UNCERT  64     // power-up after a reset during a move: the stored position may be off (set it with CW7)
 
 // Event log (characterisation of the real motor: start delay, speed per PWM, coasting).
 // k = type | dir << 4 (1 CW, 2 CCW, 0 relays off) | level << 6 (edges) | coast << 7 (edge with the motor off)
@@ -78,6 +79,8 @@ public:
   int16_t target() const { return tgt; }
   int8_t  dir() const { return mdir; }
   bool    moving() const { return st != S_IDLE || want; }   // includes a move waiting for the coasting to end
+  bool    driving() const { return st != S_IDLE; }          // relays energised or about to be
+  bool    manual_mode() const { return mode == M_MANUAL; }
   uint8_t status() const;
 
   // commands
@@ -88,7 +91,7 @@ public:
   void stop_now();               // explicit STOP: motor current off immediately
   void set_speed(uint8_t pwm) { speed = pwm; }   // VL/VR velocity cap (0 = s.pwm_max)
   void set_position(int16_t t);  // calibration: 0..3599 keeps the current turn, other values are raw
-  void clear_errors() { errors = 0; }
+  void clear_errors() { errors &= (ER_NOPOS | ER_UNCERT); }   // position errors only go away with CW7
 
   // registers ('0'..'9', 'a'..'f'); text in/out, angles with one decimal
   bool reg_read(char r, char *out) const;
@@ -96,19 +99,23 @@ public:
   bool settings_dirty = false;
 
   // position persistence: the hardware layer saves when due()
-  bool save_due(uint32_t now_ms) const;
-  void saved() { saved_cnt = cnt_copy(); has_saved = true; }
+  bool save_due(uint32_t now_ms, bool force) const;    // idle, coasting over, and the position changed (or force)
+  void saved(int16_t written) { saved_cnt = written; has_saved = true; }
+  bool calibrated_now = false;                       // set by CW7: the hardware layer refreshes the K3NG mirror
   int16_t cnt_copy() const;
 
 private:
   enum { S_IDLE, S_RELAY_ON, S_RUN, S_SOFT, S_RELAY_OFF };
   enum { M_NONE, M_TARGET, M_MANUAL };
   uint8_t st = S_IDLE, mode = M_NONE, speed = 0;
-  int8_t mdir = 0;                  // direction of the current / pending move
+  int8_t mdir = 0;                  // direction the relays drive (set at relay-on only)
+  int8_t man_dir = 0;               // direction requested by ML/MR/VL/VR/buttons
+  volatile int16_t clamp_lo = 0, clamp_hi = 0;   // counter limits in counts (read by the ISR)
+  void set_clamps();
   int16_t tgt = 0;                  // raw target (tenths)
   bool want = false;                // a request waits for the motor to stop / coast out
   bool corrected = false, holding = false, brake_on = false;
-  uint32_t t_state = 0, t_move = 0, t_tick = 0, t_idle = 0;
+  uint32_t t_state = 0, t_move = 0, t_tick = 0, t_idle = 0, t_cmd = 0;
   uint16_t ramp_acc = 0;            // PWM * 256 while ramping
   int16_t saved_cnt = 0; bool has_saved = false;
   uint32_t rej_window_ms = 0; uint16_t rej_in_window = 0;
@@ -126,6 +133,8 @@ private:
   void log_ev(uint8_t type, uint32_t now, int16_t c = 0x7FFF);          // main loop (c default: position)
   void set_state(uint8_t ns, uint32_t now);
 };
+
+bool settings_ok(const Settings &s);
 
 // helpers shared with the protocol
 int16_t parse_tenths(const char *p, bool *ok);
