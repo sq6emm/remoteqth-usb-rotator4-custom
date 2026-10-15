@@ -48,3 +48,15 @@ The collector lost 420 of about 1500 events, all during the long full-speed move
   stretch where the rotator stopped. The fractional targets 117.7, 125.6, 114.2 and 120.0 report exactly; 123.3 reports
   123.1, and 120.5 from 120.0 stays (a 0.5 move cannot land closer). STOP from full speed: 1.01-1.22 deg = 226-273 ms
   x speed (1.2 test: 177-223). PD e792: the contact is closed for 0.792 of each degree.
+
+## Firmware 1.5 full test
+
+- `precision15.*`: the same sequence as for 1.3. All landings on 120 report 120.0 (once 120.1 from above).
+  117.7, 123.3, 114.2 and 120.0 report exactly; 125.6 reports 125.8; 120.5 from 120.0 stays. STOP and PD e791 match 1.3.
+  h = 225, set under 1.4, survived the flash: the delayed settings write works on the real board.
+- `live15.csv` + `live_check.py`: live AR samples (~4/s) against the time-interpolated edge timeline of the log, on
+  neighbouring edges. 1.5 live value: mean 0.06, median 0.04, 90 % 0.12. The edge-only value (1.4): mean 0.35, 90 % 0.73.
+  104/104 samples lie inside the bracketing edges.
+- `hamcam_live.py`: 350 -> 10 -> 350 through north while polling hamcam's telemetry at 5 Hz. The azimuth moves
+  smoothly (e.g. 351.0, 351.5, 352.6 ...), and both rests are exact (raw 10.0 / -10.0). The overlap tag lags up to ~1 s
+  around north (telemetry asks w AR once a second).
